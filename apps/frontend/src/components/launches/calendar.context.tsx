@@ -1,6 +1,6 @@
 'use client';
-import 'reflect-metadata';
 
+import 'reflect-metadata';
 import {
   createContext,
   FC,
@@ -18,21 +18,33 @@ import { Post, Integration, Tags } from '@prisma/client';
 import { useSearchParams } from 'next/navigation';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import weekOfYear from 'dayjs/plugin/weekOfYear';
-
 import { extend } from 'dayjs';
 extend(isoWeek);
 extend(weekOfYear);
-
 export const CalendarContext = createContext({
   currentDay: dayjs().day() as 0 | 1 | 2 | 3 | 4 | 5 | 6,
   currentWeek: dayjs().week(),
   currentYear: dayjs().year(),
   currentMonth: dayjs().month(),
   customer: null as string | null,
-  comments: [] as Array<{ date: string; total: number }>,
-  integrations: [] as (Integrations & { refreshNeeded?: boolean })[],
+  sets: [] as { name: string; id: string; content: string[] }[],
+  signature: undefined as any,
+  comments: [] as Array<{
+    date: string;
+    total: number;
+  }>,
+  integrations: [] as (Integrations & {
+    refreshNeeded?: boolean;
+  })[],
   trendings: [] as string[],
-  posts: [] as Array<Post & { integration: Integration, tags: {tag: Tags}[] }>,
+  posts: [] as Array<
+    Post & {
+      integration: Integration;
+      tags: {
+        tag: Tags;
+      }[];
+    }
+  >,
   reloadCalendarView: () => {
     /** empty **/
   },
@@ -51,7 +63,6 @@ export const CalendarContext = createContext({
     /** empty **/
   },
 });
-
 export interface Integrations {
   name: string;
   id: string;
@@ -64,13 +75,14 @@ export interface Integrations {
   changeProfilePicture: boolean;
   additionalSettings: string;
   changeNickName: boolean;
-  time: { time: number }[];
+  time: {
+    time: number;
+  }[];
   customer?: {
     name?: string;
     id?: string;
   };
 }
-
 function getWeekNumber(date: Date) {
   // Copy date so don't modify original
   const targetDate = new Date(
@@ -88,7 +100,6 @@ function getWeekNumber(date: Date) {
     ((targetDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
   );
 }
-
 export const CalendarWeekProvider: FC<{
   children: ReactNode;
   integrations: Integrations[];
@@ -96,11 +107,8 @@ export const CalendarWeekProvider: FC<{
   const fetch = useFetch();
   const [internalData, setInternalData] = useState([] as any[]);
   const [trendings] = useState<string[]>([]);
-
   const searchParams = useSearchParams();
-
   const display = searchParams.get('display') || 'week';
-
   const [filters, setFilters] = useState({
     currentDay: +(searchParams.get('day') || dayjs().day()) as
       | 0
@@ -116,7 +124,6 @@ export const CalendarWeekProvider: FC<{
     customer: (searchParams.get('customer') as string) || null,
     display,
   });
-
   const params = useMemo(() => {
     return new URLSearchParams({
       display: filters.display,
@@ -127,18 +134,27 @@ export const CalendarWeekProvider: FC<{
       customer: filters?.customer?.toString() || '',
     }).toString();
   }, [filters, display]);
-
   const loadData = useCallback(async () => {
     const data = (await fetch(`/posts?${params}`)).json();
     return data;
   }, [filters, params]);
-
   const swr = useSWR(`/posts-${params}`, loadData, {
     refreshInterval: 3600000,
     refreshWhenOffline: false,
     refreshWhenHidden: false,
     revalidateOnFocus: false,
   });
+
+  const defaultSign = useCallback(async () => {
+    return await (await fetch('/signatures/default')).json();
+  }, []);
+
+  const setList = useCallback(async () => {
+    return (await fetch('/sets')).json();
+  }, []);
+
+  const { data: sets, mutate } = useSWR('sets', setList);
+  const { data: sign} = useSWR('default-sign', defaultSign);
 
   const setFiltersWrapper = useCallback(
     (filters: {
@@ -151,7 +167,6 @@ export const CalendarWeekProvider: FC<{
     }) => {
       setFilters(filters);
       setInternalData([]);
-
       const path = [
         `day=${filters.currentDay}`,
         `week=${filters.currentWeek}`,
@@ -164,10 +179,11 @@ export const CalendarWeekProvider: FC<{
     },
     [filters, swr.mutate]
   );
-
   const { isLoading } = swr;
-  const { posts, comments } = swr?.data || { posts: [], comments: [] };
-
+  const { posts, comments } = swr?.data || {
+    posts: [],
+    comments: [],
+  };
   const changeDate = useCallback(
     (id: string, date: dayjs.Dayjs) => {
       setInternalData((d) =>
@@ -184,13 +200,11 @@ export const CalendarWeekProvider: FC<{
     },
     [posts, internalData]
   );
-
   useEffect(() => {
     if (posts) {
       setInternalData(posts);
     }
   }, [posts]);
-
   return (
     <CalendarContext.Provider
       value={{
@@ -202,11 +216,12 @@ export const CalendarWeekProvider: FC<{
         setFilters: setFiltersWrapper,
         changeDate,
         comments,
+        sets: sets || [],
+        signature: sign,
       }}
     >
       {children}
     </CalendarContext.Provider>
   );
 };
-
 export const useCalendar = () => useContext(CalendarContext);

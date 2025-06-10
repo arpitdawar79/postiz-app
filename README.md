@@ -14,15 +14,15 @@
 </p>
 
 <p align="center">
-<a href="https://opensource.org/licenses/Apache-2.0">
-  <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
+<a href="https://opensource.org/license/agpl-v3">
+  <img src="https://img.shields.io/badge/License-AGPL%203.0-blue.svg" alt="License">
 </a>
 </p>
 
 <div align="center">
   <strong>
   <h2>Your ultimate AI social media scheduling tool</h2><br />
-  <a href="https://postiz.com">Postiz</a>: An alternative to: Buffer.com, Hypefury, Twitter Hunter, Etc...<br /><br />
+  <a href="https://postiz.com">Postiz</a>: An alternative to: Buffer.com, Hypefury, Twitter Hunter, etc...<br /><br />
   </strong>
   Postiz offers everything you need to manage your social media posts,<br />build an audience, capture leads, and grow your business.
 </div>
@@ -75,7 +75,7 @@
 ## ✨ Features
 
 | ![Image 1](https://github.com/user-attachments/assets/a27ee220-beb7-4c7e-8c1b-2c44301f82ef) | ![Image 2](https://github.com/user-attachments/assets/eb5f5f15-ed90-47fc-811c-03ccba6fa8a2) |
-|--------------------------------|--------------------------------|
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | ![Image 3](https://github.com/user-attachments/assets/d51786ee-ddd8-4ef8-8138-5192e9cfe7c3) | ![Image 4](https://github.com/user-attachments/assets/91f83c89-22f6-43d6-b7aa-d2d3378289fb) |
 
 # Intro

@@ -1,22 +1,24 @@
-import {FC, useEffect, useState} from "react";
-import {Integrations} from "@gitroom/frontend/components/launches/calendar.context";
-import {PickPlatforms} from "@gitroom/frontend/components/launches/helpers/pick.platform.component";
-import {IntegrationContext} from "@gitroom/frontend/components/launches/helpers/use.integration";
-import {ShowAllProviders} from "@gitroom/frontend/components/launches/providers/show.all.providers";
-import dayjs from "dayjs";
+import { FC, useEffect, useState } from 'react';
+import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
+import { PickPlatforms } from '@gitroom/frontend/components/launches/helpers/pick.platform.component';
+import { IntegrationContext } from '@gitroom/frontend/components/launches/helpers/use.integration';
+import { ShowAllProviders } from '@gitroom/frontend/components/launches/providers/show.all.providers';
+import dayjs from 'dayjs';
 import { useStateCallback } from '@gitroom/react/helpers/use.state.callback';
-
 export const ProvidersOptions: FC<{
+  hideEditOnlyThis: boolean;
   integrations: Integrations[];
   allIntegrations: Integrations[];
-  editorValue: Array<{ id?: string; content: string }>;
+  editorValue: Array<{
+    id?: string;
+    content: string;
+  }>;
   date: dayjs.Dayjs;
 }> = (props) => {
-  const { integrations, editorValue, date } = props;
+  const { integrations, editorValue, date, hideEditOnlyThis } = props;
   const [selectedIntegrations, setSelectedIntegrations] = useStateCallback([
     integrations[0],
   ]);
-
   useEffect(() => {
     if (integrations.indexOf(selectedIntegrations[0]) === -1) {
       setSelectedIntegrations([integrations[0]]);
@@ -33,9 +35,15 @@ export const ProvidersOptions: FC<{
         isMain={false}
       />
       <IntegrationContext.Provider
-        value={{ value: editorValue, integration: selectedIntegrations?.[0], date, allIntegrations: props.allIntegrations }}
+        value={{
+          value: editorValue,
+          integration: selectedIntegrations?.[0],
+          date,
+          allIntegrations: props.allIntegrations,
+        }}
       >
         <ShowAllProviders
+          hideEditOnlyThis={hideEditOnlyThis}
           value={editorValue}
           integrations={integrations}
           selectedProvider={selectedIntegrations?.[0]}

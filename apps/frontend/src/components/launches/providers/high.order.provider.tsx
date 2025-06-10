@@ -44,9 +44,15 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { InternalChannels } from '@gitroom/frontend/components/launches/internal.channels';
 import { MergePost } from '@gitroom/frontend/components/launches/merge.post';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { useSet } from '@gitroom/frontend/components/launches/set.context';
+import { SeparatePost } from '@gitroom/frontend/components/launches/separate.post';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 
 // Simple component to change back to settings on after changing tab
-export const SetTab: FC<{ changeTab: () => void }> = (props) => {
+export const SetTab: FC<{
+  changeTab: () => void;
+}> = (props) => {
   useEffect(() => {
     return () => {
       setTimeout(() => {
@@ -58,10 +64,11 @@ export const SetTab: FC<{ changeTab: () => void }> = (props) => {
 };
 
 // This is a simple function that if we edit in place, we hide the editor on top
-export const EditorWrapper: FC<{ children: ReactNode }> = ({ children }) => {
+export const EditorWrapper: FC<{
+  children: ReactNode;
+}> = ({ children }) => {
   const showHide = useHideTopEditor();
   const [showEditor, setShowEditor] = useState(false);
-
   useEffect(() => {
     setShowEditor(true);
     showHide.hide();
@@ -70,20 +77,25 @@ export const EditorWrapper: FC<{ children: ReactNode }> = ({ children }) => {
       setShowEditor(false);
     };
   }, []);
-
   if (!showEditor) {
     return null;
   }
-
   return children;
 };
-
 export const withProvider = function <T extends object>(
-  SettingsComponent: FC<{ values?: any }> | null,
-  CustomPreviewComponent?: FC<{ maximumCharacters?: number }>,
+  SettingsComponent: FC<{
+    values?: any;
+  }> | null,
+  CustomPreviewComponent?: FC<{
+    maximumCharacters?: number;
+  }>,
   dto?: any,
   checkValidity?: (
-    value: Array<Array<{ path: string }>>,
+    value: Array<
+      Array<{
+        path: string;
+      }>
+    >,
     settings: T
   ) => Promise<string | true>,
   maximumCharacters?: number | ((settings: any) => number)
@@ -94,24 +106,27 @@ export const withProvider = function <T extends object>(
     value: Array<{
       content: string;
       id?: string;
-      image?: Array<{ path: string; id: string }>;
+      image?: Array<{
+        path: string;
+        id: string;
+      }>;
     }>;
     hideMenu?: boolean;
     show: boolean;
+    hideEditOnlyThis?: boolean;
   }) => {
     const existingData = useExistingData();
+    const t = useT();
     const { allIntegrations, integration, date } = useIntegration();
     const [showLinkedinPopUp, setShowLinkedinPopUp] = useState<any>(false);
     const [uploading, setUploading] = useState(false);
     const [showComponent, setShowComponent] = useState(false);
     const fetch = useFetch();
-
     useEffect(() => {
       setTimeout(() => {
         setShowComponent(true);
       }, 1);
     }, []);
-
     useCopilotReadable({
       description:
         integration?.type === 'social'
@@ -124,7 +139,10 @@ export const withProvider = function <T extends object>(
       Array<{
         id?: string;
         content: string;
-        image?: Array<{ id: string; path: string }>;
+        image?: Array<{
+          id: string;
+          path: string;
+        }>;
       }>
     >(
       // @ts-ignore
@@ -134,10 +152,13 @@ export const withProvider = function <T extends object>(
             content: p.content,
             image: p.image,
           }))
-        : [{ content: '' }]
+        : [
+            {
+              content: '',
+            },
+          ]
     );
     const [showTab, setShowTab] = useState(0);
-
     const Component = useMemo(() => {
       return SettingsComponent ? SettingsComponent : () => <></>;
     }, [SettingsComponent]);
@@ -153,9 +174,14 @@ export const withProvider = function <T extends object>(
       }
     );
 
+    const set = useSet();
+
     // this is a smart function, it updates the global value without updating the states (too heavy) and set the settings validation
     const form = useValues(
-      existingData.settings,
+      set?.set
+        ? set?.set?.posts?.find((p) => p?.integration?.id === props?.id)
+            ?.settings
+        : existingData.settings,
       props.id,
       props.identifier,
       editInPlace ? InPlaceValue : props.value,
@@ -185,26 +211,44 @@ export const withProvider = function <T extends object>(
           (all, current) => {
             all[0].content = all[0].content + current.content + '\n';
             all[0].image = [...all[0].image, ...(current.image || [])];
-
             return all;
           },
           [
             {
               content: '',
               id: InPlaceValue[0].id,
-              image: [] as { id: string; path: string }[],
+              image: [] as {
+                id: string;
+                path: string;
+              }[],
             },
           ]
         )
       );
     }, [InPlaceValue]);
 
+    const separatePosts = useCallback(
+      (posts: string[]) => {
+        setInPlaceValue(
+          posts.map((p, i) => ({
+            content: p,
+            id: InPlaceValue?.[i]?.id || makeId(10),
+            image: InPlaceValue?.[i]?.image || [],
+          }))
+        );
+      },
+      [InPlaceValue]
+    );
+
     const changeImage = useCallback(
       (index: number) =>
         (newValue: {
           target: {
             name: string;
-            value?: Array<{ id: string; path: string }>;
+            value?: Array<{
+              id: string;
+              path: string;
+            }>;
           };
         }) => {
           return setInPlaceValue((prev) => {
@@ -219,19 +263,24 @@ export const withProvider = function <T extends object>(
     const addValue = useCallback(
       (index: number) => () => {
         setInPlaceValue((prev) => {
-          return prev.reduce((acc, p, i) => {
-            acc.push(p);
-            if (i === index) {
-              acc.push({ content: '' });
-            }
-
-            return acc;
-          }, [] as Array<{ content: string }>);
+          return prev.reduce(
+            (acc, p, i) => {
+              acc.push(p);
+              if (i === index) {
+                acc.push({
+                  content: '',
+                });
+              }
+              return acc;
+            },
+            [] as Array<{
+              content: string;
+            }>
+          );
         });
       },
       []
     );
-
     const changePosition = useCallback(
       (index: number) => (type: 'up' | 'down') => {
         if (type === 'up' && index !== 0) {
@@ -278,11 +327,14 @@ export const withProvider = function <T extends object>(
       ) {
         return false;
       }
-
       setEditInPlace(!editInPlace);
       setInPlaceValue(
         editInPlace
-          ? [{ content: '' }]
+          ? [
+              {
+                content: '',
+              },
+            ]
           : props.value.map((p) => ({
               id: p.id,
               content: p.content,
@@ -290,7 +342,6 @@ export const withProvider = function <T extends object>(
             }))
       );
     }, [props.value, editInPlace]);
-
     useCopilotAction({
       name: editInPlace
         ? 'switchToGlobalEdit'
@@ -302,7 +353,6 @@ export const withProvider = function <T extends object>(
         await changeToEditor();
       },
     });
-
     const tagPersonOrCompany = useCallback(
       (integration: string, editor: (value: string) => void) => () => {
         setShowLinkedinPopUp(
@@ -317,27 +367,27 @@ export const withProvider = function <T extends object>(
       },
       []
     );
-
     const uppy = useUppyUploader({
       onUploadSuccess: () => {
         /**empty**/
       },
       allowedFileTypes: 'image/*,video/mp4',
     });
-
     const pasteImages = useCallback(
       (index: number, currentValue: any[], isFile?: boolean) => {
         return async (event: ClipboardEvent<HTMLDivElement> | File[]) => {
           // @ts-ignore
           const clipboardItems = isFile
             ? // @ts-ignore
-              event.map((p) => ({ kind: 'file', getAsFile: () => p }))
+              event.map((p) => ({
+                kind: 'file',
+                getAsFile: () => p,
+              }))
             : // @ts-ignore
               event.clipboardData?.items; // Ensure clipboardData is available
           if (!clipboardItems) {
             return;
           }
-
           const files: File[] = [];
 
           // @ts-ignore
@@ -357,7 +407,6 @@ export const withProvider = function <T extends object>(
           if (files.length === 0) {
             return;
           }
-
           setUploading(true);
           const lastValues = [...currentValue];
           for (const file of files) {
@@ -379,22 +428,23 @@ export const withProvider = function <T extends object>(
       },
       [changeImage]
     );
-
     const getInternalPlugs = useCallback(async () => {
       return (
         await fetch(`/integrations/${props.identifier}/internal-plugs`)
       ).json();
     }, [props.identifier]);
-
-    const { data, isLoading } = useSWR(`internal-${props.identifier}`, getInternalPlugs, {
-      revalidateOnReconnect: true,
-    });
+    const { data, isLoading } = useSWR(
+      `internal-${props.identifier}`,
+      getInternalPlugs,
+      {
+        revalidateOnReconnect: true,
+      }
+    );
 
     // this is a trick to prevent the data from being deleted, yet we don't render the elements
     if (!props.show || !showComponent || isLoading) {
       return null;
     }
-
     return (
       <FormProvider {...form}>
         <SetTab changeTab={() => setShowTab(0)} />
@@ -408,7 +458,7 @@ export const withProvider = function <T extends object>(
                   secondary={showTab !== 0}
                   onClick={() => setShowTab(0)}
                 >
-                  Preview
+                  {t('preview', 'Preview')}
                 </Button>
               </div>
               {(!!SettingsComponent || !!data?.internalPlugs?.length) && (
@@ -421,11 +471,11 @@ export const withProvider = function <T extends object>(
                     secondary={showTab !== 2}
                     onClick={() => setShowTab(2)}
                   >
-                    Settings
+                    {t('settings', 'Settings')}
                   </Button>
                 </div>
               )}
-              {!existingData.integration && (
+              {!existingData.integration && !props.hideEditOnlyThis && (
                 <div className="flex-1 flex">
                   <Button
                     className="text-white rounded-[4px] flex-1 !bg-red-700 overflow-hidden whitespace-nowrap"
@@ -448,14 +498,18 @@ export const withProvider = function <T extends object>(
             createPortal(
               <EditorWrapper>
                 {uploading && (
-                  <div className="absolute left-0 top-0 w-full h-full bg-black/40 z-[600] flex justify-center items-center">
+                  <div className="absolute start-0 top-0 w-full h-full bg-black/40 z-[600] flex justify-center items-center">
                     <LoadingComponent width={100} height={100} />
                   </div>
                 )}
                 <div className="flex flex-col gap-[20px]">
                   {!existingData?.integration && (
                     <div className="bg-red-800 text-white">
-                      You are now editing only {integration?.name} (
+                      {t(
+                        'you_are_now_editing_only',
+                        'You are now editing only'
+                      )}
+                      {integration?.name} (
                       {capitalize(integration?.identifier.replace('-', ' '))})
                     </div>
                   )}
@@ -474,7 +528,7 @@ export const withProvider = function <T extends object>(
                                     changeValue(index)(val.content + newValue)
                                 )}
                               >
-                                Tag a company
+                                {t('tag_a_company', 'Tag a company')}
                               </Button>
                             )}
                             <DropFiles
@@ -503,8 +557,11 @@ export const withProvider = function <T extends object>(
                               />
                             </DropFiles>
                             {(!val.content || val.content.length < 6) && (
-                              <div className="my-[5px] text-customColor19 text-[12px] font-[500]">
-                                The post should be at least 6 characters long
+                              <div className="my-[5px] !bg-red-600 text-[12px] font-[500]">
+                                {t(
+                                  'the_post_should_be_at_least_6_characters_long',
+                                  'The post should be at least 6 characters long'
+                                )}
                               </div>
                             )}
                             <div className="flex">
@@ -538,8 +595,8 @@ export const withProvider = function <T extends object>(
                                         />
                                       </svg>
                                     </div>
-                                    <div className="text-[12px] font-[500] pr-[10px]">
-                                      Delete Post
+                                    <div className="text-[12px] font-[500] pe-[10px]">
+                                      {t('delete_post', 'Delete Post')}
                                     </div>
                                   </div>
                                 )}
@@ -563,11 +620,25 @@ export const withProvider = function <T extends object>(
                       </div>
                     </Fragment>
                   ))}
-                  {InPlaceValue.length > 1 && (
+                  <div className="flex gap-[4px]">
+                    {InPlaceValue.length > 1 && (
+                      <div>
+                        <MergePost merge={merge} />
+                      </div>
+                    )}
                     <div>
-                      <MergePost merge={merge} />
+                      <SeparatePost
+                        changeLoading={setUploading}
+                        posts={InPlaceValue.map((p) => p.content)}
+                        len={
+                          typeof maximumCharacters === 'number'
+                            ? maximumCharacters
+                            : 10000
+                        }
+                        merge={separatePosts}
+                      />
                     </div>
-                  )}
+                  </div>
                 </div>
               </EditorWrapper>,
               document.querySelector('#renderEditor')!
@@ -623,7 +694,7 @@ export const withProvider = function <T extends object>(
                     />
                   )
                 ) : (
-                  <>No Content Yet</>
+                  <>{t('no_content_yet', 'No Content Yet')}</>
                 )}
               </IntegrationContext.Provider>
             </div>

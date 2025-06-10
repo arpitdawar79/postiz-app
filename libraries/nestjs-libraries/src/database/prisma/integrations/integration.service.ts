@@ -33,15 +33,13 @@ export class IntegrationService {
     private _autopostsRepository: AutopostRepository,
     private _integrationManager: IntegrationManager,
     private _notificationService: NotificationService,
-    private _workerServiceProducer: BullMqClient
+    private _workerServiceProducer: BullMqClient,
   ) {}
 
   async changeActiveCron(orgId: string) {
-    const data = await this._autopostsRepository.getAutoposts(
-      orgId,
-    );
+    const data = await this._autopostsRepository.getAutoposts(orgId);
 
-    for (const item of data.filter(f => f.active)) {
+    for (const item of data.filter((f) => f.active)) {
       await this._workerServiceProducer.deleteScheduler('cron', item.id);
     }
 
@@ -462,15 +460,18 @@ export class IntegrationService {
     );
   }
 
-  async processInternalPlug(data: {
-    post: string;
-    originalIntegration: string;
-    integration: string;
-    plugName: string;
-    orgId: string;
-    delay: number;
-    information: any;
-  }) {
+  async processInternalPlug(
+    data: {
+      post: string;
+      originalIntegration: string;
+      integration: string;
+      plugName: string;
+      orgId: string;
+      delay: number;
+      information: any;
+    },
+    forceRefresh = false
+  ): Promise<any> {
     const originalIntegration =
       await this._integrationRepository.getIntegrationById(
         data.orgId,
@@ -498,6 +499,63 @@ export class IntegrationService {
       getIntegration.providerIdentifier
     );
 
+    if (
+      dayjs(getIntegration?.tokenExpiration).isBefore(dayjs()) ||
+      forceRefresh
+    ) {
+      const { accessToken, expiresIn, refreshToken, additionalSettings } =
+        await new Promise<AuthTokenDetails>((res) => {
+          getSocialIntegration
+            .refreshToken(getIntegration.refreshToken!)
+            .then((r) => res(r))
+            .catch(() =>
+              res({
+                accessToken: '',
+                expiresIn: 0,
+                refreshToken: '',
+                id: '',
+                name: '',
+                username: '',
+                picture: '',
+                additionalSettings: undefined,
+              })
+            );
+        });
+
+      if (!accessToken) {
+        await this.refreshNeeded(
+          getIntegration.organizationId,
+          getIntegration.id
+        );
+
+        await this.informAboutRefreshError(
+          getIntegration.organizationId,
+          getIntegration
+        );
+        return {};
+      }
+
+      await this.createOrUpdateIntegration(
+        additionalSettings,
+        !!getSocialIntegration.oneTimeToken,
+        getIntegration.organizationId,
+        getIntegration.name,
+        getIntegration.picture!,
+        'social',
+        getIntegration.internalId,
+        getIntegration.providerIdentifier,
+        accessToken,
+        refreshToken,
+        expiresIn
+      );
+
+      getIntegration.token = accessToken;
+
+      if (getSocialIntegration.refreshWait) {
+        await timer(10000);
+      }
+    }
+
     try {
       // @ts-ignore
       await getSocialIntegration?.[getAllInternalPlugs.methodName]?.(
@@ -507,6 +565,10 @@ export class IntegrationService {
         data.information
       );
     } catch (err) {
+      if (err instanceof RefreshToken) {
+        return this.processInternalPlug(data, true);
+      }
+
       return;
     }
   }

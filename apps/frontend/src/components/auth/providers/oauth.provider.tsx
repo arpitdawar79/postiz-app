@@ -1,13 +1,15 @@
+'use client';
+
 import { useCallback } from 'react';
 import Image from 'next/image';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import interClass from '@gitroom/react/helpers/inter.font';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
-
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
 export const OauthProvider = () => {
   const fetch = useFetch();
   const { oauthLogoUrl, oauthDisplayName } = useVariables();
-
+  const t = useT();
   const gotoLogin = useCallback(async () => {
     try {
       const response = await fetch('/auth/oauth/GENERIC');
@@ -22,7 +24,6 @@ export const OauthProvider = () => {
       console.error('Failed to get generic oauth login link:', error);
     }
   }, []);
-
   return (
     <div
       onClick={gotoLogin}
@@ -34,9 +35,13 @@ export const OauthProvider = () => {
           alt="genericOauth"
           width={40}
           height={40}
+          className="-mt-[7px]"
         />
       </div>
-      <div>Sign in with {oauthDisplayName || 'OAuth'}</div>
+      <div>
+        {t('sign_in_with', 'Sign in with')}&nbsp;
+        {oauthDisplayName || 'OAuth'}
+      </div>
     </div>
   );
 };

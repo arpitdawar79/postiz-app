@@ -60,12 +60,14 @@ import { SelectCustomer } from '@gitroom/frontend/components/launches/select.cus
 import { TagsComponent } from './tags.component';
 import { RepeatComponent } from '@gitroom/frontend/components/launches/repeat.component';
 import { MergePost } from '@gitroom/frontend/components/launches/merge.post';
-
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { type CreatePostDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
+import { uniq } from 'lodash';
+import { SetContext } from '@gitroom/frontend/components/launches/set.context';
 function countCharacters(text: string, type: string): number {
   if (type !== 'x') {
     return text.length;
   }
-
   return weightedLength(text);
 }
 
@@ -73,6 +75,8 @@ export const AddEditModal: FC<{
   date: dayjs.Dayjs;
   integrations: Integrations[];
   allIntegrations?: Integrations[];
+  set?: CreatePostDto;
+  addEditSets?: (data: any) => void;
   reopenModal: () => void;
   mutate: () => void;
   padding?: string;
@@ -80,7 +84,10 @@ export const AddEditModal: FC<{
   onlyValues?: Array<{
     content: string;
     id?: string;
-    image?: Array<{ id: string; path: string }>;
+    image?: Array<{
+      id: string;
+      path: string;
+    }>;
   }>;
 }> = memo((props) => {
   const {
@@ -91,11 +98,15 @@ export const AddEditModal: FC<{
     onlyValues,
     padding,
     customClose,
+    addEditSets,
+    set,
   } = props;
+
   const [customer, setCustomer] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [canUseClose, setCanUseClose] = useState(true);
+  const t = useT();
 
   // selected integrations to allow edit
   const [selectedIntegrations, setSelectedIntegrations] = useStateCallback<
@@ -106,33 +117,66 @@ export const AddEditModal: FC<{
     if (!customer) {
       return ints;
     }
-
     const list = ints.filter((f) => f?.customer?.id === customer);
-    if (list.length === 1) {
+    if (list.length === 1 && !set) {
       setSelectedIntegrations([list[0]]);
     }
-
     return list;
-  }, [customer, ints]);
-
+  }, [customer, ints, set]);
   const [dateState, setDateState] = useState(date);
 
   // hook to open a new modal
   const modal = useModals();
+
+  const selectIntegrationsDefault = useMemo(() => {
+    if (!set) {
+      return [];
+    }
+
+    const keepReference: Integrations[] = [];
+    const neededIntegrations = uniq(set.posts.flatMap((p) => p.integration.id));
+    for (const i of ints) {
+      if (neededIntegrations.indexOf(i.id) > -1) {
+        keepReference.push(i);
+      }
+    }
+
+    return keepReference;
+  }, [set]);
+
+  useEffect(() => {
+    if (set?.posts) {
+      setSelectedIntegrations(selectIntegrationsDefault);
+    }
+  }, [selectIntegrationsDefault]);
 
   // value of each editor
   const [value, setValue] = useState<
     Array<{
       content: string;
       id?: string;
-      image?: Array<{ id: string; path: string }>;
+      image?: Array<{
+        id: string;
+        path: string;
+      }>;
     }>
-  >(onlyValues ? onlyValues : [{ content: '' }]);
-
+  >(
+    onlyValues
+      ? onlyValues
+      : set
+      ? set?.posts?.[0]?.value || [
+          {
+            content: '',
+          },
+        ]
+      : [
+          {
+            content: '',
+          },
+        ]
+  );
   const fetch = useFetch();
-
   const user = useUser();
-
   const updateOrder = useCallback(() => {
     modal.closeAll();
     reopenModal();
@@ -154,27 +198,26 @@ export const AddEditModal: FC<{
         (all, current) => {
           all[0].content = all[0].content + current.content + '\n';
           all[0].image = [...all[0].image, ...(current.image || [])];
-
           return all;
         },
         [
           {
             content: '',
             id: value[0].id,
-            image: [] as { id: string; path: string }[],
+            image: [] as {
+              id: string;
+              path: string;
+            }[],
           },
         ]
       )
     );
   }, [value]);
-
   const [showError, setShowError] = useState(false);
 
   // are we in edit mode?
   const existingData = useExistingData();
-
   const [inter, setInter] = useState(existingData?.posts?.[0]?.intervalInDays);
-
   const [tags, setTags] = useState<any[]>(
     // @ts-ignore
     existingData?.posts?.[0]?.tags?.map((p: any) => ({
@@ -185,9 +228,7 @@ export const AddEditModal: FC<{
 
   // Post for
   const [postFor, setPostFor] = useState<Information | undefined>();
-
   const expend = useExpend();
-
   const toaster = useToaster();
 
   // if it's edit just set the current integration
@@ -204,7 +245,6 @@ export const AddEditModal: FC<{
   // if the user exit the popup we reset the global variable with all the values
   useEffect(() => {
     supportEmitter.emit('change', false);
-
     return () => {
       supportEmitter.emit('change', true);
       resetValues();
@@ -221,16 +261,24 @@ export const AddEditModal: FC<{
     },
     [value]
   );
-
   const changeImage = useCallback(
     (index: number) =>
       (newValue: {
-        target: { name: string; value?: Array<{ id: string; path: string }> };
+        target: {
+          name: string;
+          value?: Array<{
+            id: string;
+            path: string;
+          }>;
+        };
       }) => {
         return setValue((prev) => {
           return prev.map((p, i) => {
             if (i === index) {
-              return { ...p, image: newValue.target.value };
+              return {
+                ...p,
+                image: newValue.target.value,
+              };
             }
             return p;
           });
@@ -243,19 +291,24 @@ export const AddEditModal: FC<{
   const addValue = useCallback(
     (index: number) => () => {
       setValue((prev) => {
-        return prev.reduce((acc, p, i) => {
-          acc.push(p);
-          if (i === index) {
-            acc.push({ content: '' });
-          }
-
-          return acc;
-        }, [] as Array<{ content: string }>);
+        return prev.reduce(
+          (acc, p, i) => {
+            acc.push(p);
+            if (i === index) {
+              acc.push({
+                content: '',
+              });
+            }
+            return acc;
+          },
+          [] as Array<{
+            content: string;
+          }>
+        );
       });
     },
     []
   );
-
   const changePosition = useCallback(
     (index: number) => (type: 'up' | 'down') => {
       if (type === 'up' && index !== 0) {
@@ -295,11 +348,13 @@ export const AddEditModal: FC<{
     if (!canUseClose) {
       return;
     }
-
     if (
       await deleteDialog(
-        'Are you sure you want to close this modal? (all data will be lost)',
-        'Yes, close it!'
+        t(
+          'are_you_sure_you_want_to_close_this_modal_all_data_will_be_lost',
+          'Are you sure you want to close this modal? (all data will be lost)'
+        ),
+        t('yes_close_it', 'Yes, close it!')
       )
     ) {
       if (customClose) {
@@ -312,12 +367,10 @@ export const AddEditModal: FC<{
 
   // sometimes it's easier to click escape to close
   useKeypress('Escape', askClose);
-
   const postNow = useCallback(
     ((e) => {
       e.stopPropagation();
       e.preventDefault();
-
       return schedule('now')();
     }) as MouseEventHandler<HTMLDivElement>,
     []
@@ -344,9 +397,7 @@ export const AddEditModal: FC<{
         modal.closeAll();
         return;
       }
-
       const values = getValues();
-
       const allKeys = Object.keys(values).map((v) => ({
         integration: integrations.find((p) => p.id === v),
         value: values[v].posts,
@@ -357,7 +408,6 @@ export const AddEditModal: FC<{
         checkValidity: values[v].checkValidity,
         maximumCharacters: values[v].maximumCharacters,
       }));
-
       if (type !== 'draft') {
         for (const key of allKeys) {
           if (key.checkValidity) {
@@ -370,7 +420,6 @@ export const AddEditModal: FC<{
               return;
             }
           }
-
           if (
             key.value.some((p) => {
               return (
@@ -393,20 +442,19 @@ export const AddEditModal: FC<{
               return;
             }
           }
-
           if (key.value.some((p) => !p.content || p.content.length < 6)) {
             setShowError(true);
             return;
           }
-
           if (!key.valid) {
             await key.trigger();
-            moveToIntegration({ identifier: key?.integration?.id! });
+            moveToIntegration({
+              identifier: key?.integration?.id!,
+            });
             return;
           }
         }
       }
-
       const shortLinkUrl = await (
         await fetch('/posts/should-shortlink', {
           method: 'POST',
@@ -419,49 +467,59 @@ export const AddEditModal: FC<{
           }),
         })
       ).json();
-
       const shortLink = !shortLinkUrl.ask
         ? false
         : await deleteDialog(
             'Do you want to shortlink the URLs? it will let you get statistics over clicks',
             'Yes, shortlink it!'
           );
-
       setLoading(true);
-      await fetch('/posts', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...(postFor ? { order: postFor.id } : {}),
-          type,
-          inter,
-          tags,
-          shortLink,
-          date: dateState.utc().format('YYYY-MM-DDTHH:mm:ss'),
-          posts: allKeys.map((p) => ({
-            ...p,
-            value: p.value.map((a) => ({
-              ...a,
-              content: a.content.slice(0, p.maximumCharacters || 1000000),
-            })),
-          })),
-        }),
-      });
 
+      const data = {
+        ...(postFor
+          ? {
+              order: postFor.id,
+            }
+          : {}),
+        type,
+        inter,
+        tags,
+        shortLink,
+        date: dateState.utc().format('YYYY-MM-DDTHH:mm:ss'),
+        posts: allKeys.map((p) => ({
+          ...p,
+          value: p.value.map((a) => ({
+            ...a,
+            content: a.content.slice(0, p.maximumCharacters || 1000000),
+          })),
+        })),
+      };
+
+      addEditSets
+        ? addEditSets(data)
+        : await fetch('/posts', {
+            method: 'POST',
+            body: JSON.stringify(data),
+          });
       existingData.group = makeId(10);
 
-      mutate();
-      toaster.show(
-        !existingData.integration
-          ? 'Added successfully'
-          : 'Updated successfully'
-      );
-
+      if (!addEditSets) {
+        mutate();
+        toaster.show(
+          !existingData.integration
+            ? 'Added successfully'
+            : 'Updated successfully'
+        );
+      }
       if (customClose) {
         setTimeout(() => {
           customClose();
         }, 2000);
       }
-      modal.closeAll();
+
+      if (!addEditSets) {
+        modal.closeAll();
+      }
     },
     [
       inter,
@@ -472,29 +530,30 @@ export const AddEditModal: FC<{
       existingData,
       selectedIntegrations,
       tags,
+      addEditSets,
     ]
   );
-
   const uppy = useUppyUploader({
     onUploadSuccess: () => {
       /**empty**/
     },
     allowedFileTypes: 'image/*,video/mp4',
   });
-
   const pasteImages = useCallback(
     (index: number, currentValue: any[], isFile?: boolean) => {
       return async (event: ClipboardEvent<HTMLDivElement> | File[]) => {
         // @ts-ignore
         const clipboardItems = isFile
           ? // @ts-ignore
-            event.map((p) => ({ kind: 'file', getAsFile: () => p }))
+            event.map((p) => ({
+              kind: 'file',
+              getAsFile: () => p,
+            }))
           : // @ts-ignore
             event.clipboardData?.items; // Ensure clipboardData is available
         if (!clipboardItems) {
           return;
         }
-
         const files: File[] = [];
 
         // @ts-ignore
@@ -514,7 +573,6 @@ export const AddEditModal: FC<{
         if (files.length === 0) {
           return;
         }
-
         setUploading(true);
         const lastValues = [...currentValue];
         for (const file of files) {
@@ -536,40 +594,32 @@ export const AddEditModal: FC<{
     },
     [changeImage]
   );
-
   const getPostsMarketplace = useCallback(async () => {
     return (
       await fetch(`/posts/marketplace/${existingData?.posts?.[0]?.id}`)
     ).json();
   }, []);
-
   const { data } = useSWR(
     `/posts/marketplace/${existingData?.posts?.[0]?.id}`,
     getPostsMarketplace
   );
-
   const canSendForPublication = useMemo(() => {
     if (!postFor) {
       return true;
     }
-
     return selectedIntegrations.every((integration) => {
       const find = postFor.missing.find(
         (p) => p.integration.integration.id === integration.id
       );
-
       if (!find) {
         return false;
       }
-
       return find.missing !== 0;
     });
   }, [data, postFor, selectedIntegrations]);
-
   useClickOutside(askClose);
-
   return (
-    <>
+    <SetContext.Provider value={{ set }}>
       {user?.tier?.ai && (
         <CopilotPopup
           hitEscapeToClose={false}
@@ -593,10 +643,12 @@ Here are the things you can do:
         className={clsx(
           'flex flex-col md:flex-row p-[10px] rounded-[4px] bg-primary gap-[20px]'
         )}
-        style={{ padding }}
+        style={{
+          padding,
+        }}
       >
         {uploading && (
-          <div className="absolute left-0 top-0 w-full h-full bg-black/40 z-[600] flex justify-center items-center">
+          <div className="absolute start-0 top-0 w-full h-full bg-black/40 z-[600] flex justify-center items-center">
             <LoadingComponent width={100} height={100} />
           </div>
         )}
@@ -647,7 +699,7 @@ Here are the things you can do:
                 <PickPlatforms
                   toolTip={true}
                   integrations={integrations.filter((f) => !f.disabled)}
-                  selectedIntegrations={[]}
+                  selectedIntegrations={selectIntegrationsDefault}
                   singleSelect={false}
                   onChange={setSelectedIntegrations}
                   isMain={true}
@@ -669,13 +721,13 @@ Here are the things you can do:
                 {selectedIntegrations?.[0]?.identifier === 'youtube' ? (
                   <img
                     src="/icons/platforms/youtube.svg"
-                    className="absolute z-10 -bottom-[5px] -right-[5px]"
+                    className="absolute z-10 -bottom-[5px] -end-[5px]"
                     width={20}
                   />
                 ) : (
                   <Image
                     src={`/icons/platforms/${selectedIntegrations?.[0]?.identifier}.png`}
-                    className="rounded-full absolute z-10 -bottom-[5px] -right-[5px] border border-fifth"
+                    className="rounded-full absolute z-10 -bottom-[5px] -end-[5px] border border-fifth"
                     alt={selectedIntegrations?.[0]?.identifier}
                     width={20}
                     height={20}
@@ -689,7 +741,12 @@ Here are the things you can do:
             />
             {!existingData.integration && !showHide.hideTopEditor ? (
               <>
-                <div>You are in global editing mode</div>
+                <div>
+                  {t(
+                    'you_are_in_global_editing_mode',
+                    'You are in global editing mode'
+                  )}
+                </div>
                 {value.map((p, index) => (
                   <Fragment key={`edit_${index}`}>
                     <div>
@@ -712,15 +769,18 @@ Here are the things you can do:
 
                           {showError &&
                             (!p.content || p.content.length < 6) && (
-                              <div className="my-[5px] text-customColor19 text-[12px] font-[500]">
-                                The post should be at least 6 characters long
+                              <div className="my-[5px] !bg-red-600 text-[12px] font-[500]">
+                                {t(
+                                  'the_post_should_be_at_least_6_characters_long',
+                                  'The post should be at least 6 characters long'
+                                )}
                               </div>
                             )}
                           <div className="flex">
                             <div className="flex-1">
                               <MultiMediaComponent
                                 text={p.content}
-                                label="Attachments"
+                                label={t('attachments', 'Attachments')}
                                 description=""
                                 value={p.image}
                                 name="image"
@@ -749,8 +809,8 @@ Here are the things you can do:
                                       />
                                     </svg>
                                   </div>
-                                  <div className="text-[12px] font-[500] pr-[10px]">
-                                    Delete Post
+                                  <div className="text-[12px] font-[500] pe-[10px]">
+                                    {t('delete_post', 'Delete Post')}
                                   </div>
                                 </div>
                               )}
@@ -782,7 +842,7 @@ Here are the things you can do:
             ) : null}
           </div>
           <div className="relative min-h-[68px] flex flex-col rounded-[4px] border border-customColor6 bg-sixth">
-            <div className="gap-[10px] relative flex flex-col justify-center items-center min-h-full pr-[16px]">
+            <div className="gap-[10px] relative flex flex-col justify-center items-center min-h-full pe-[16px]">
               <div
                 id="add-edit-post-dialog-buttons"
                 className="flex flex-row flex-wrap w-full h-full gap-[10px] justify-end items-center"
@@ -798,70 +858,87 @@ Here are the things you can do:
                       className="rounded-[4px] border-2 border-red-400 text-red-400"
                       secondary={true}
                     >
-                      Delete Post
+                      {t('delete_post', 'Delete Post')}
                     </Button>
                   )}
-                  <Button
-                    onClick={schedule('draft')}
-                    className="rounded-[4px] border-2 border-customColor21"
-                    secondary={true}
-                    disabled={selectedIntegrations.length === 0}
-                  >
-                    Save as draft
-                  </Button>
 
-                  <Button
-                    onClick={schedule('schedule')}
-                    className="rounded-[4px] relative group"
-                    disabled={
-                      selectedIntegrations.length === 0 ||
-                      loading ||
-                      !canSendForPublication
-                    }
-                  >
-                    <div className="flex justify-center items-center gap-[5px] h-full">
-                      <div className="h-full flex items-center text-white">
-                        {!canSendForPublication
-                          ? 'Not matching order'
-                          : postFor
-                          ? 'Submit for order'
-                          : !existingData.integration
-                          ? selectedIntegrations.length === 0
-                            ? `Select channels from the circles above`
-                            : 'Add to calendar'
-                          : // @ts-ignore
-                          existingData?.posts?.[0]?.state === 'DRAFT'
-                          ? 'Schedule'
-                          : 'Update'}
-                      </div>
-                      {!postFor && (
-                        <div className="h-full flex items-center">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="18"
-                            height="18"
-                            viewBox="0 0 18 18"
-                            fill="none"
-                          >
-                            <path
-                              d="M15.0233 7.14804L9.39828 12.773C9.34604 12.8253 9.284 12.8668 9.21572 12.8951C9.14743 12.9234 9.07423 12.938 9.00031 12.938C8.92639 12.938 8.8532 12.9234 8.78491 12.8951C8.71662 12.8668 8.65458 12.8253 8.60234 12.773L2.97734 7.14804C2.8718 7.04249 2.8125 6.89934 2.8125 6.75007C2.8125 6.6008 2.8718 6.45765 2.97734 6.3521C3.08289 6.24655 3.22605 6.18726 3.37531 6.18726C3.52458 6.18726 3.66773 6.24655 3.77328 6.3521L9.00031 11.5798L14.2273 6.3521C14.2796 6.29984 14.3417 6.25838 14.4099 6.2301C14.4782 6.20181 14.5514 6.18726 14.6253 6.18726C14.6992 6.18726 14.7724 6.20181 14.8407 6.2301C14.909 6.25838 14.971 6.29984 15.0233 6.3521C15.0755 6.40436 15.117 6.46641 15.1453 6.53469C15.1736 6.60297 15.1881 6.67616 15.1881 6.75007C15.1881 6.82398 15.1736 6.89716 15.1453 6.96545C15.117 7.03373 15.0755 7.09578 15.0233 7.14804Z"
-                              fill="white"
-                            />
-                          </svg>
-                          <div
-                            onClick={postNow}
-                            className={clsx(
-                              'hidden group-hover:flex hover:flex flex-col justify-center absolute left-0 top-[100%] w-full h-[40px] bg-customColor22 border border-tableBorder',
-                              loading &&
-                                'cursor-not-allowed pointer-events-none opacity-50'
-                            )}
-                          >
-                            Post now
-                          </div>
+                  {addEditSets && (
+                    <Button
+                      onClick={schedule('draft')}
+                      className="rounded-[4px] relative group"
+                    >
+                      {t('save_set', 'Save Set')}
+                    </Button>
+                  )}
+
+                  {!addEditSets && (
+                    <Button
+                      onClick={schedule('draft')}
+                      className="rounded-[4px] border-2 border-customColor21"
+                      secondary={true}
+                      disabled={selectedIntegrations.length === 0}
+                    >
+                      {t('save_as_draft', 'Save as draft')}
+                    </Button>
+                  )}
+
+                  {!addEditSets && (
+                    <Button
+                      onClick={schedule('schedule')}
+                      className="rounded-[4px] relative group"
+                      disabled={
+                        selectedIntegrations.length === 0 ||
+                        loading ||
+                        !canSendForPublication
+                      }
+                    >
+                      <div className="flex justify-center items-center gap-[5px] h-full">
+                        <div className="h-full flex items-center text-white">
+                          {!canSendForPublication
+                            ? t('not_matching_order', 'Not matching order')
+                            : postFor
+                            ? t('submit_for_order', 'Submit for order')
+                            : !existingData.integration
+                            ? selectedIntegrations.length === 0
+                              ? t(
+                                  'select_channels_from_circles',
+                                  'Select channels from the circles above'
+                                )
+                              : t('add_to_calendar', 'Add to calendar')
+                            : // @ts-ignore
+                            existingData?.posts?.[0]?.state === 'DRAFT'
+                            ? t('schedule', 'Schedule')
+                            : t('update', 'Update')}
                         </div>
-                      )}
-                    </div>
-                  </Button>
+                        {!postFor && (
+                          <div className="h-full flex items-center">
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="18"
+                              height="18"
+                              viewBox="0 0 18 18"
+                              fill="none"
+                            >
+                              <path
+                                d="M15.0233 7.14804L9.39828 12.773C9.34604 12.8253 9.284 12.8668 9.21572 12.8951C9.14743 12.9234 9.07423 12.938 9.00031 12.938C8.92639 12.938 8.8532 12.9234 8.78491 12.8951C8.71662 12.8668 8.65458 12.8253 8.60234 12.773L2.97734 7.14804C2.8718 7.04249 2.8125 6.89934 2.8125 6.75007C2.8125 6.6008 2.8718 6.45765 2.97734 6.3521C3.08289 6.24655 3.22605 6.18726 3.37531 6.18726C3.52458 6.18726 3.66773 6.24655 3.77328 6.3521L9.00031 11.5798L14.2273 6.3521C14.2796 6.29984 14.3417 6.25838 14.4099 6.2301C14.4782 6.20181 14.5514 6.18726 14.6253 6.18726C14.6992 6.18726 14.7724 6.20181 14.8407 6.2301C14.909 6.25838 14.971 6.29984 15.0233 6.3521C15.0755 6.40436 15.117 6.46641 15.1453 6.53469C15.1736 6.60297 15.1881 6.67616 15.1881 6.75007C15.1881 6.82398 15.1736 6.89716 15.1453 6.96545C15.117 7.03373 15.0755 7.09578 15.0233 7.14804Z"
+                                fill="white"
+                              />
+                            </svg>
+                            <div
+                              onClick={postNow}
+                              className={clsx(
+                                'hidden group-hover:flex hover:flex flex-col justify-center absolute start-0 top-[100%] w-full h-[40px] bg-customColor22 border border-tableBorder',
+                                loading &&
+                                  'cursor-not-allowed pointer-events-none opacity-50'
+                              )}
+                            >
+                              {t('post_now', 'Post now')}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </Button>
+                  )}
                 </Submitted>
               </div>
             </div>
@@ -879,7 +956,7 @@ Here are the things you can do:
             <TopTitle title="" removeTitle={true}>
               <TagsComponent
                 name="tags"
-                label="Tags"
+                label={t('tags', 'Tags')}
                 initial={tags}
                 onChange={(e) => setTags(e.target.value)}
               />
@@ -902,6 +979,7 @@ Here are the things you can do:
           {!!selectedIntegrations.length && (
             <div className="flex-1 flex flex-col p-[16px] pt-0">
               <ProvidersOptions
+                hideEditOnlyThis={!!addEditSets}
                 allIntegrations={props.allIntegrations || []}
                 integrations={selectedIntegrations}
                 editorValue={value}
@@ -911,6 +989,6 @@ Here are the things you can do:
           )}
         </div>
       </div>
-    </>
+    </SetContext.Provider>
   );
 });

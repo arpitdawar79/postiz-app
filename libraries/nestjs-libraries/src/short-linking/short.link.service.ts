@@ -3,14 +3,19 @@ import { Empty } from '@gitroom/nestjs-libraries/short-linking/providers/empty';
 import { ShortLinking } from '@gitroom/nestjs-libraries/short-linking/short-linking.interface';
 import { Injectable } from '@nestjs/common';
 import { ShortIo } from './providers/short.io';
+import { Kutt } from './providers/kutt';
 
 const getProvider = (): ShortLinking => {
   if (process.env.DUB_TOKEN) {
     return new Dub();
   }
 
-  if ( process.env.SHORT_IO_SECRET_KEY ) {
+  if (process.env.SHORT_IO_SECRET_KEY) {
     return new ShortIo();
+  }
+
+  if (process.env.KUTT_API_KEY) {
+    return new Kutt();
   }
 
   return new Empty();
@@ -33,7 +38,9 @@ export class ShortLinkService {
       return false;
     }
 
-    return urls.some((url) => url.indexOf(ShortLinkService.provider.shortLinkDomain) === -1);
+    return urls.some(
+      (url) => url.indexOf(ShortLinkService.provider.shortLinkDomain) === -1
+    );
   }
 
   async convertTextToShortLinks(id: string, messages: string[]) {
