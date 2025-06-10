@@ -2,8 +2,9 @@ module.exports = {
   apps: [
     {
       name: 'postiz-backend',
-      script: 'apps/backend/dist/main.js',
-      instances: 'max',
+      script: 'pnpm',
+      args: 'run start:prod:backend',
+      instances: 1,
       exec_mode: 'cluster',
       autorestart: true,
       watch: false,
@@ -14,8 +15,9 @@ module.exports = {
     },
     {
       name: 'postiz-frontend',
-      script: 'apps/frontend/dist/server.js',
-      instances: 'max',
+      script: 'pnpm',
+      args: 'run start:prod:frontend',
+      instances: 1,
       exec_mode: 'cluster',
       autorestart: true,
       watch: false,
@@ -27,7 +29,8 @@ module.exports = {
     },
     {
       name: 'postiz-workers',
-      script: 'apps/workers/dist/main.js',
+      script: 'pnpm',
+      args: 'run start:prod:workers',
       instances: 2,
       exec_mode: 'cluster',
       autorestart: true,
@@ -39,7 +42,8 @@ module.exports = {
     },
     {
       name: 'postiz-cron',
-      script: 'apps/cron/dist/main.js',
+      script: 'pnpm',
+      args: 'run start:prod:cron',
       instances: 1,
       exec_mode: 'fork',
       autorestart: true,
@@ -50,4 +54,4 @@ module.exports = {
       },
     },
   ],
-}; 
+};
