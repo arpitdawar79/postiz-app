@@ -30,7 +30,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <html className={interClass}>
       <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" href="/favicon.png" sizes="any" />
       </head>
       <body className={clsx(chakra.className, 'dark text-primary !bg-primary')}>
         <HtmlComponent />
