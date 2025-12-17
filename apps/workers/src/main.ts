@@ -1,10 +1,16 @@
+import { initializeSentry } from '@gitroom/nestjs-libraries/sentry/initialize.sentry';
+initializeSentry('workers');
+
 import { NestFactory } from '@nestjs/core';
 
-import { AppModule } from './app/app.module';
 import { MicroserviceOptions } from '@nestjs/microservices';
 import { BullMqServer } from '@gitroom/nestjs-libraries/bull-mq-transport-new/strategy';
 
-async function bootstrap() {
+import { AppModule } from './app/app.module';
+
+async function start() {
+  process.env.IS_WORKER = 'true';
+
   // some comment again
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(
     AppModule,
@@ -16,4 +22,4 @@ async function bootstrap() {
   await app.listen();
 }
 
-bootstrap();
+start();

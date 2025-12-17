@@ -19,7 +19,7 @@ export interface IAuthenticator {
     id: string,
     requiredId: string,
     accessToken: string
-  ): Promise<AuthTokenDetails>;
+  ): Promise<Omit<AuthTokenDetails, 'refreshToken' | 'expiresIn'>>;
   generateAuthUrl(
     clientInformation?: ClientInformation
   ): Promise<GenerateAuthUrlResponse>;
@@ -101,8 +101,18 @@ export type PollDetails = {
 
 export type MediaContent = {
   type: 'image' | 'video'; // Type of the media content
-  url: string; // URL of the media file, if it's already hosted somewhere
   path: string;
+  alt?: string;
+  thumbnail?: string;
+  thumbnailTimestamp?: number;
+};
+
+export type FetchPageInformationResult = {
+  id: string;
+  name: string;
+  access_token: string;
+  picture: string;
+  username: string;
 };
 
 export interface SocialProvider
@@ -111,7 +121,10 @@ export interface SocialProvider
   identifier: string;
   refreshWait?: boolean;
   convertToJPEG?: boolean;
+  dto?: any;
+  maxLength: (additionalSettings?: any) => number;
   isWeb3?: boolean;
+  editor: 'normal' | 'markdown' | 'html';
   customFields?: () => Promise<
     {
       key: string;
@@ -129,4 +142,12 @@ export interface SocialProvider
   externalUrl?: (
     url: string
   ) => Promise<{ client_id: string; client_secret: string }>;
+  mention?: (
+    token: string, data: { query: string }, id: string, integration: Integration
+  ) => Promise<{ id: string; label: string; image: string, doNotCache?: boolean }[] | {none: true}>;
+  mentionFormat?(idOrHandle: string, name: string): string;
+  fetchPageInformation?(
+    accessToken: string,
+    data: any
+  ): Promise<FetchPageInformationResult>;
 }

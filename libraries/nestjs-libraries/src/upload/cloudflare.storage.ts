@@ -58,17 +58,17 @@ class CloudflareStorage implements IUploadProvider {
   }
 
   async uploadSimple(path: string) {
-    const loadImage = await axios.get(path, { responseType: 'arraybuffer' });
+    const loadImage = await fetch(path);
     const contentType =
-      loadImage?.headers?.['content-type'] ||
-      loadImage?.headers?.['Content-Type'];
+      loadImage?.headers?.get('content-type') ||
+      loadImage?.headers?.get('Content-Type');
     const extension = getExtension(contentType)!;
     const id = makeId(10);
 
     const params = {
       Bucket: this._bucketName,
       Key: `${id}.${extension}`,
-      Body: loadImage.data,
+      Body: Buffer.from(await loadImage.arrayBuffer()),
       ContentType: contentType,
       ChecksumMode: 'DISABLED',
     };
@@ -80,31 +80,36 @@ class CloudflareStorage implements IUploadProvider {
   }
 
   async uploadFile(file: Express.Multer.File): Promise<any> {
-    const id = makeId(10);
-    const extension = mime.extension(file.mimetype) || '';
+    try {
+      const id = makeId(10);
+      const extension = mime.extension(file.mimetype) || '';
 
-    // Create the PutObjectCommand to upload the file to Cloudflare R2
-    const command = new PutObjectCommand({
-      Bucket: this._bucketName,
-      ACL: 'public-read',
-      Key: `${id}.${extension}`,
-      Body: file.buffer,
-    });
+      // Create the PutObjectCommand to upload the file to Cloudflare R2
+      const command = new PutObjectCommand({
+        Bucket: this._bucketName,
+        ACL: 'public-read',
+        Key: `${id}.${extension}`,
+        Body: file.buffer,
+      });
 
-    await this._client.send(command);
+      await this._client.send(command);
 
-    return {
-      filename: `${id}.${extension}`,
-      mimetype: file.mimetype,
-      size: file.size,
-      buffer: file.buffer,
-      originalname: `${id}.${extension}`,
-      fieldname: 'file',
-      path: `${this._uploadUrl}/${id}.${extension}`,
-      destination: `${this._uploadUrl}/${id}.${extension}`,
-      encoding: '7bit',
-      stream: file.buffer as any,
-    };
+      return {
+        filename: `${id}.${extension}`,
+        mimetype: file.mimetype,
+        size: file.size,
+        buffer: file.buffer,
+        originalname: `${id}.${extension}`,
+        fieldname: 'file',
+        path: `${this._uploadUrl}/${id}.${extension}`,
+        destination: `${this._uploadUrl}/${id}.${extension}`,
+        encoding: '7bit',
+        stream: file.buffer as any,
+      };
+    } catch (err) {
+      console.error('Error uploading file to Cloudflare R2:', err);
+      throw err;
+    }
   }
 
   // Implement the removeFile method from IUploadProvider

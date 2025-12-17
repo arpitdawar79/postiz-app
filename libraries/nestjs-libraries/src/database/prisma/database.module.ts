@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { PrismaRepository, PrismaService } from './prisma.service';
+import { PrismaRepository, PrismaService, PrismaTransaction } from './prisma.service';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
@@ -37,6 +37,11 @@ import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/au
 import { AutopostService } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.service';
 import { SetsService } from '@gitroom/nestjs-libraries/database/prisma/sets/sets.service';
 import { SetsRepository } from '@gitroom/nestjs-libraries/database/prisma/sets/sets.repository';
+import { ThirdPartyRepository } from '@gitroom/nestjs-libraries/database/prisma/third-party/third-party.repository';
+import { ThirdPartyService } from '@gitroom/nestjs-libraries/database/prisma/third-party/third-party.service';
+import { VideoManager } from '@gitroom/nestjs-libraries/videos/video.manager';
+import { FalService } from '@gitroom/nestjs-libraries/openai/fal.service';
+import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 
 @Global()
 @Module({
@@ -45,6 +50,7 @@ import { SetsRepository } from '@gitroom/nestjs-libraries/database/prisma/sets/s
   providers: [
     PrismaService,
     PrismaRepository,
+    PrismaTransaction,
     UsersService,
     UsersRepository,
     OrganizationService,
@@ -75,13 +81,18 @@ import { SetsRepository } from '@gitroom/nestjs-libraries/database/prisma/sets/s
     ItemUserService,
     MessagesService,
     IntegrationManager,
+    RefreshIntegrationService,
     ExtractContentService,
     OpenaiService,
+    FalService,
     EmailService,
     TrackService,
     ShortLinkService,
     SetsService,
     SetsRepository,
+    ThirdPartyRepository,
+    ThirdPartyService,
+    VideoManager,
   ],
   get exports() {
     return this.providers;

@@ -15,22 +15,28 @@ import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.reque
 import { Organization } from '@prisma/client';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
-import {
-  AuthorizationActions,
-  Sections,
-} from '@gitroom/backend/services/auth/permissions/permissions.service';
-import { CreatePostDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
+import {
+  AuthorizationActions,
+  Sections,
+} from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
+import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.function.dto';
+import { UploadDto } from '@gitroom/nestjs-libraries/dtos/media/upload.dto';
+import axios from 'axios';
+import { Readable } from 'stream';
+import { lookup } from 'mime-types';
+import * as Sentry from '@sentry/nestjs';
 
 @ApiTags('Public API')
 @Controller('/public/v1')
 export class PublicIntegrationsController {
   private storage = UploadFactory.createStorage();
-
+  
   constructor(
     private _integrationService: IntegrationService,
     private _postsService: PostsService,
@@ -43,6 +49,7 @@ export class PublicIntegrationsController {
     @GetOrgFromRequest() org: Organization,
     @UploadedFile('file') file: Express.Multer.File
   ) {
+    Sentry.metrics.count("public_api-request", 1);
     if (!file) {
       throw new HttpException({ msg: 'No file provided' }, 400);
     }
@@ -55,13 +62,54 @@ export class PublicIntegrationsController {
     );
   }
 
+  @Post('/upload-from-url')
+  async uploadsFromUrl(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: UploadDto
+  ) {
+    Sentry.metrics.count("public_api-request", 1);
+    const response = await axios.get(body.url, {
+      responseType: 'arraybuffer',
+    });
+
+    const buffer = Buffer.from(response.data);
+
+    const getFile = await this.storage.uploadFile({
+      buffer,
+      mimetype: lookup(body?.url?.split?.('?')?.[0]) || 'image/jpeg',
+      size: buffer.length,
+      path: '',
+      fieldname: '',
+      destination: '',
+      stream: new Readable(),
+      filename: '',
+      originalname: '',
+      encoding: '',
+    });
+
+    return this._mediaService.saveFile(
+      org.id,
+      getFile.originalname,
+      getFile.path
+    );
+  }
+
+  @Get('/find-slot/:id')
+  async findSlotIntegration(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id?: string
+  ) {
+    Sentry.metrics.count("public_api-request", 1);
+    return { date: await this._postsService.findFreeDateTime(org.id, id) };
+  }
+
   @Get('/posts')
   async getPosts(
     @GetOrgFromRequest() org: Organization,
     @Query() query: GetPostsDto
   ) {
+    Sentry.metrics.count("public_api-request", 1);
     const posts = await this._postsService.getPosts(org.id, query);
-
     return {
       posts,
       // comments,
@@ -70,10 +118,18 @@ export class PublicIntegrationsController {
 
   @Post('/posts')
   @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
-  createPost(
+  async createPost(
     @GetOrgFromRequest() org: Organization,
-    @Body() body: CreatePostDto
+    @Body() rawBody: any
   ) {
+    Sentry.metrics.count("public_api-request", 1);
+    const body = await this._postsService.mapTypeToPost(
+      rawBody,
+      org.id,
+      rawBody.type === 'draft'
+    );
+    body.type = rawBody.type;
+
     console.log(JSON.stringify(body, null, 2));
     return this._postsService.createPost(org.id, body);
   }
@@ -83,12 +139,20 @@ export class PublicIntegrationsController {
     @GetOrgFromRequest() org: Organization,
     @Param() body: { id: string }
   ) {
+    Sentry.metrics.count("public_api-request", 1);
     const getPostById = await this._postsService.getPost(org.id, body.id);
     return this._postsService.deletePost(org.id, getPostById.group);
   }
 
+  @Get('/is-connected')
+  async getActiveIntegrations(@GetOrgFromRequest() org: Organization) {
+    Sentry.metrics.count("public_api-request", 1);
+    return { connected: true };
+  }
+
   @Get('/integrations')
   async listIntegration(@GetOrgFromRequest() org: Organization) {
+    Sentry.metrics.count("public_api-request", 1);
     return (await this._integrationService.getIntegrationsList(org.id)).map(
       (org) => ({
         id: org.id,
@@ -104,6 +168,25 @@ export class PublicIntegrationsController {
             }
           : undefined,
       })
+    );
+  }
+
+  @Post('/generate-video')
+  generateVideo(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: VideoDto
+  ) {
+    Sentry.metrics.count("public_api-request", 1);
+    return this._mediaService.generateVideo(org, body);
+  }
+
+  @Post('/video/function')
+  videoFunction(@Body() body: VideoFunctionDto) {
+    Sentry.metrics.count("public_api-request", 1);
+    return this._mediaService.videoFunction(
+      body.identifier,
+      body.functionName,
+      body.params
     );
   }
 }

@@ -11,7 +11,11 @@ import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { timer } from '@gitroom/helpers/utils/timer';
+import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 
+@Rules(
+  'LinkedIn can have maximum one attachment when selecting video, when choosing a carousel on LinkedIn minimum amount of attachment must be two, and only pictures, if uploading a video, LinkedIn can have only one attachment'
+)
 export class LinkedinPageProvider
   extends LinkedinProvider
   implements SocialProvider
@@ -20,6 +24,7 @@ export class LinkedinPageProvider
   override name = 'LinkedIn Page';
   override isBetweenSteps = true;
   override refreshWait = true;
+  override maxConcurrentJob = 2; // LinkedIn Page has professional posting limits
   override scopes = [
     'openid',
     'profile',
@@ -29,6 +34,8 @@ export class LinkedinPageProvider
     'w_organization_social',
     'r_organization_social',
   ];
+
+  override editor = 'normal' as const;
 
   override async refreshToken(
     refresh_token: string
@@ -142,24 +149,22 @@ export class LinkedinPageProvider
     id: string,
     requiredId: string,
     accessToken: string
-  ): Promise<AuthTokenDetails> {
-    const information = await this.fetchPageInformation(
-      accessToken,
-      requiredId
-    );
+  ): Promise<Omit<AuthTokenDetails, 'refreshToken' | 'expiresIn'>> {
+    const information = await this.fetchPageInformation(accessToken, {
+      page: requiredId,
+    });
 
     return {
       id: information.id,
       name: information.name,
       accessToken: information.access_token,
-      refreshToken: information.access_token,
-      expiresIn: dayjs().add(59, 'days').unix() - dayjs().unix(),
       picture: information.picture,
       username: information.username,
     };
   }
 
-  async fetchPageInformation(accessToken: string, pageId: string) {
+  async fetchPageInformation(accessToken: string, params: { page: string }) {
+    const pageId = params.page;
     const data = await (
       await fetch(
         `https://api.linkedin.com/v2/organizations/${pageId}?projection=(id,localizedName,vanityName,logoV2(original~:playableStreams))`,
@@ -262,7 +267,7 @@ export class LinkedinPageProvider
     const startDate = dayjs().subtract(date, 'days').unix() * 1000;
 
     const { elements }: { elements: Root[]; paging: any } = await (
-      await this.fetch(
+      await fetch(
         `https://api.linkedin.com/v2/organizationPageStatistics?q=organization&organization=${encodeURIComponent(
           `urn:li:organization:${id}`
         )}&timeIntervals=(timeRange:(start:${startDate},end:${endDate}),timeGranularityType:DAY)`,
@@ -277,7 +282,7 @@ export class LinkedinPageProvider
     ).json();
 
     const { elements: elements2 }: { elements: Root[]; paging: any } = await (
-      await this.fetch(
+      await fetch(
         `https://api.linkedin.com/v2/organizationalEntityFollowerStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(
           `urn:li:organization:${id}`
         )}&timeIntervals=(timeRange:(start:${startDate},end:${endDate}),timeGranularityType:DAY)`,
@@ -292,7 +297,7 @@ export class LinkedinPageProvider
     ).json();
 
     const { elements: elements3 }: { elements: Root[]; paging: any } = await (
-      await this.fetch(
+      await fetch(
         `https://api.linkedin.com/v2/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(
           `urn:li:organization:${id}`
         )}&timeIntervals=(timeRange:(start:${startDate},end:${endDate}),timeGranularityType:DAY)`,

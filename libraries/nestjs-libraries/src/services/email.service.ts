@@ -3,6 +3,7 @@ import { EmailInterface } from '@gitroom/nestjs-libraries/emails/email.interface
 import { ResendProvider } from '@gitroom/nestjs-libraries/emails/resend.provider';
 import { EmptyProvider } from '@gitroom/nestjs-libraries/emails/empty.provider';
 import { NodeMailerProvider } from '@gitroom/nestjs-libraries/emails/node.mailer.provider';
+import { concurrency } from '@gitroom/helpers/utils/concurrency.service';
 
 @Injectable()
 export class EmailService {
@@ -95,14 +96,18 @@ export class EmailService {
     </div>
     `;
 
-    const sends = await this.emailService.sendEmail(
-      to,
-      subject,
-      modifiedHtml,
-      process.env.EMAIL_FROM_NAME,
-      process.env.EMAIL_FROM_ADDRESS,
-      replyTo
-    );
-    console.log(sends);
+    try {
+      const sends = await this.emailService.sendEmail(
+        to,
+        subject,
+        modifiedHtml,
+        process.env.EMAIL_FROM_NAME,
+        process.env.EMAIL_FROM_ADDRESS,
+        replyTo
+      );
+      console.log(sends);
+    } catch (err) {
+      console.log(err);
+    }
   }
 }

@@ -17,21 +17,19 @@ import { Response, Request } from 'express';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
-import {
-  AuthorizationActions,
-  Sections,
-} from '@gitroom/backend/services/auth/permissions/permissions.service';
 import { getCookieUrlFromDomain } from '@gitroom/helpers/subdomain/subdomain.management';
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { ApiTags } from '@nestjs/swagger';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
 import { UserDetailDto } from '@gitroom/nestjs-libraries/dtos/users/user.details.dto';
+import { EmailNotificationsDto } from '@gitroom/nestjs-libraries/dtos/users/email-notifications.dto';
 import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/exception.filter';
 import { RealIP } from 'nestjs-real-ip';
 import { UserAgent } from '@gitroom/nestjs-libraries/user/user.agent';
 import { TrackEnum } from '@gitroom/nestjs-libraries/user/track.enum';
 import { TrackService } from '@gitroom/nestjs-libraries/track/track.service';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 @ApiTags('User')
 @Controller('/user')
@@ -69,6 +67,7 @@ export class UsersController {
       isLifetime: !!organization?.subscription?.isLifetime,
       admin: !!user.isSuperAdmin,
       impersonate: !!impersonate,
+      isTrailing: !process.env.STRIPE_PUBLISHABLE_KEY ? false : organization?.isTrailing,
       allowTrial: organization?.allowTrial,
       // @ts-ignore
       publicApi: organization?.users[0]?.role === 'SUPERADMIN' || organization?.users[0]?.role === 'ADMIN' ? organization?.apiKey : '',
@@ -125,6 +124,19 @@ export class UsersController {
     @Body() body: UserDetailDto
   ) {
     return this._userService.changePersonal(user.id, body);
+  }
+
+  @Get('/email-notifications')
+  async getEmailNotifications(@GetUserFromRequest() user: User) {
+    return this._userService.getEmailNotifications(user.id);
+  }
+
+  @Post('/email-notifications')
+  async updateEmailNotifications(
+    @GetUserFromRequest() user: User,
+    @Body() body: EmailNotificationsDto
+  ) {
+    return this._userService.updateEmailNotifications(user.id, body);
   }
 
   @Get('/subscription')
@@ -201,6 +213,7 @@ export class UsersController {
 
   @Post('/logout')
   logout(@Res({ passthrough: true }) response: Response) {
+    response.header('logout', 'true');
     response.cookie('auth', '', {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED

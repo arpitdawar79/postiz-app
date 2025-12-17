@@ -6,14 +6,19 @@ import {
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { google } from 'googleapis';
+import { google, youtube_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library/build/src/auth/oauth2client';
 import axios from 'axios';
 import { YoutubeSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/youtube.settings.dto';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  BadBody,
+  SocialAbstract,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import * as process from 'node:process';
 import dayjs from 'dayjs';
-import { GaxiosError } from 'gaxios/build/src/common';
+import { GaxiosResponse } from 'gaxios/build/src/common';
+import Schema$Video = youtube_v3.Schema$Video;
+import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 
 const clientAndYoutube = () => {
   const client = new google.auth.OAuth2({
@@ -43,10 +48,13 @@ const clientAndYoutube = () => {
   return { client, youtube, oauth2, youtubeAnalytics };
 };
 
+@Rules('YouTube must have on video attachment, it cannot be empty')
 export class YoutubeProvider extends SocialAbstract implements SocialProvider {
+  override maxConcurrentJob = 1; // YouTube has strict upload quotas
   identifier = 'youtube';
   name = 'YouTube';
-  isBetweenSteps = false;
+  isBetweenSteps = true;
+  dto = YoutubeSettingsDto;
   scopes = [
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -55,9 +63,62 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     'https://www.googleapis.com/auth/youtube.readonly',
     'https://www.googleapis.com/auth/youtube.upload',
     'https://www.googleapis.com/auth/youtubepartner',
-    'https://www.googleapis.com/auth/youtubepartner',
     'https://www.googleapis.com/auth/yt-analytics.readonly',
   ];
+
+  editor = 'normal' as const;
+  maxLength() {
+    return 5000;
+  }
+
+  override handleErrors(body: string):
+    | {
+        type: 'refresh-token' | 'bad-body';
+        value: string;
+      }
+    | undefined {
+    if (body.includes('invalidTitle')) {
+      return {
+        type: 'bad-body',
+        value:
+          'We have uploaded your video but we could not set the title. Title is too long.',
+      };
+    }
+
+    if (body.includes('failedPrecondition')) {
+      return {
+        type: 'bad-body',
+        value:
+          'We have uploaded your video but we could not set the thumbnail. Thumbnail size is too large.',
+      };
+    }
+
+    if (body.includes('uploadLimitExceeded')) {
+      return {
+        type: 'bad-body',
+        value:
+          'You have reached your daily upload limit, please try again tomorrow.',
+      };
+    }
+
+    if (body.includes('youtubeSignupRequired')) {
+      return {
+        type: 'bad-body',
+        value:
+          'You have to link your youtube account to your google account first.',
+      };
+    }
+
+    if (body.includes('youtube.thumbnail')) {
+      return {
+        type: 'bad-body',
+        value:
+          'Your account is not verified, we have uploaded your video but we could not set the thumbnail. Please verify your account and try again.',
+      };
+    }
+
+    return undefined;
+  }
 
   async refreshToken(refresh_token: string): Promise<AuthTokenDetails> {
     const { client, oauth2 } = clientAndYoutube();
@@ -77,7 +138,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       refreshToken: credentials.refresh_token!,
       id: data.id!,
       name: data.name!,
-      picture: data.picture!,
+      picture: data?.picture || '',
       username: '',
     };
   }
@@ -123,8 +184,97 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       refreshToken: tokens.refresh_token!,
       id: data.id!,
       name: data.name!,
-      picture: data.picture!,
+      picture: data?.picture || '',
       username: '',
+    };
+  }
+
+  async pages(accessToken: string) {
+    const { client, youtube } = clientAndYoutube();
+    client.setCredentials({ access_token: accessToken });
+    const youtubeClient = youtube(client);
+
+    try {
+      // Get all channels the user has access to
+      const response = await youtubeClient.channels.list({
+        part: ['snippet', 'contentDetails', 'statistics'],
+        mine: true,
+      });
+
+      const channels = response.data.items || [];
+
+      return channels.map((channel) => ({
+        id: channel.id!,
+        name: channel.snippet?.title || 'Unnamed Channel',
+        picture: {
+          data: {
+            url: channel.snippet?.thumbnails?.default?.url || '',
+          },
+        },
+        username: channel.snippet?.customUrl || '',
+        subscriberCount: channel.statistics?.subscriberCount || '0',
+      }));
+    } catch (error) {
+      console.error('Failed to fetch YouTube channels:', error);
+      return [];
+    }
+  }
+
+  async fetchPageInformation(
+    accessToken: string,
+    data: { id: string }
+  ) {
+    const { client, youtube } = clientAndYoutube();
+    client.setCredentials({ access_token: accessToken });
+    const youtubeClient = youtube(client);
+
+    try {
+      const response = await youtubeClient.channels.list({
+        part: ['snippet', 'contentDetails', 'statistics'],
+        id: [data.id],
+      });
+
+      const channel = response.data.items?.[0];
+
+      if (!channel) {
+        throw new Error('Channel not found');
+      }
+
+      return {
+        id: channel.id!,
+        name: channel.snippet?.title || 'Unnamed Channel',
+        access_token: accessToken,
+        picture: channel.snippet?.thumbnails?.default?.url || '',
+        username: channel.snippet?.customUrl || '',
+      };
+    } catch (error) {
+      console.error('Failed to fetch YouTube channel information:', error);
+      throw error;
+    }
+  }
+
+  async reConnect(
+    id: string,
+    requiredId: string,
+    accessToken: string
+  ): Promise<Omit<AuthTokenDetails, 'refreshToken' | 'expiresIn'>> {
+    const pages = await this.pages(accessToken);
+    const findPage = pages.find((p) => p.id === requiredId);
+
+    if (!findPage) {
+      throw new Error('Channel not found');
+    }
+
+    const information = await this.fetchPageInformation(accessToken, {
+      id: requiredId,
+    });
+
+    return {
+      id: information.id,
+      name: information.name,
+      accessToken: information.access_token,
+      picture: information.picture,
+      username: information.username,
     };
   }
 
@@ -142,92 +292,62 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     const { settings }: { settings: YoutubeSettingsDto } = firstPost;
 
     const response = await axios({
-      url: firstPost?.media?.[0]?.url,
+      url: firstPost?.media?.[0]?.path,
       method: 'GET',
       responseType: 'stream',
     });
 
-    try {
-      const all = await youtubeClient.videos.insert({
-        part: ['id', 'snippet', 'status'],
-        notifySubscribers: true,
-        requestBody: {
-          snippet: {
-            title: settings.title,
-            description: firstPost?.message,
-            ...(settings?.tags?.length
-              ? { tags: settings.tags.map((p) => p.label) }
-              : {}),
-            // ...(settings?.thumbnail?.url
-            //   ? {
-            //       thumbnails: {
-            //         default: {
-            //           url: settings?.thumbnail?.url,
-            //         },
-            //       },
-            //     }
-            //   : {}),
-          },
-          status: {
-            privacyStatus: settings.type,
-          },
-        },
-        media: {
-          body: response.data,
-        },
-      });
-
-      if (settings?.thumbnail?.path) {
-        try {
-          const allb = await youtubeClient.thumbnails.set({
-            videoId: all?.data?.id!,
-            media: {
-              body: (
-                await axios({
-                  url: settings?.thumbnail?.path,
-                  method: 'GET',
-                  responseType: 'stream',
-                })
-              ).data,
+    const all: GaxiosResponse<Schema$Video> = await this.runInConcurrent(
+      async () =>
+        youtubeClient.videos.insert({
+          part: ['id', 'snippet', 'status'],
+          notifySubscribers: true,
+          requestBody: {
+            snippet: {
+              title: settings.title,
+              description: firstPost?.message,
+              ...(settings?.tags?.length
+                ? { tags: settings.tags.map((p) => p.label) }
+                : {}),
             },
-          });
-        } catch (err: any) {
-          if (
-            err.response?.data?.error?.errors?.[0]?.domain ===
-            'youtube.thumbnail'
-          ) {
-            throw 'Your account is not verified, we have uploaded your video but we could not set the thumbnail. Please verify your account and try again.';
-          }
-        }
-      }
+            status: {
+              privacyStatus: settings.type,
+              selfDeclaredMadeForKids:
+                settings.selfDeclaredMadeForKids === 'yes',
+            },
+          },
+          media: {
+            body: response.data,
+          },
+        }),
+      true
+    );
 
-      return [
-        {
-          id: firstPost.id,
-          releaseURL: `https://www.youtube.com/watch?v=${all?.data?.id}`,
-          postId: all?.data?.id!,
-          status: 'success',
-        },
-      ];
-    } catch (err: any) {
-      if (
-        err.response?.data?.error?.errors?.[0]?.reason === 'failedPrecondition'
-      ) {
-        throw 'We have uploaded your video but we could not set the thumbnail. Thumbnail size is too large';
-      }
-      if (
-        err.response?.data?.error?.errors?.[0]?.reason === 'uploadLimitExceeded'
-      ) {
-        throw 'You have reached your daily upload limit, please try again tomorrow.';
-      }
-      if (
-        err.response?.data?.error?.errors?.[0]?.reason ===
-        'youtubeSignupRequired'
-      ) {
-        throw 'You have to link your youtube account to your google account first.';
-      }
+    if (settings?.thumbnail?.path) {
+      await this.runInConcurrent(async () =>
+        youtubeClient.thumbnails.set({
+          videoId: all?.data?.id!,
+          media: {
+            body: (
+              await axios({
+                url: settings?.thumbnail?.path,
+                method: 'GET',
+                responseType: 'stream',
+              })
+            ).data,
+          },
+        })
+      );
     }
-    return [];
+
+    return [
+      {
+        id: firstPost.id,
+        releaseURL: `https://www.youtube.com/watch?v=${all?.data?.id}`,
+        postId: all?.data?.id!,
+        status: 'success',
+      },
+    ];
   }
 
   async analytics(

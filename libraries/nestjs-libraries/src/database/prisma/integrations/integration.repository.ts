@@ -15,8 +15,76 @@ export class IntegrationRepository {
     private _posts: PrismaRepository<'post'>,
     private _plugs: PrismaRepository<'plugs'>,
     private _exisingPlugData: PrismaRepository<'exisingPlugData'>,
-    private _customers: PrismaRepository<'customer'>
+    private _customers: PrismaRepository<'customer'>,
+    private _mentions: PrismaRepository<'mentions'>
   ) {}
+
+  getMentions(platform: string, q: string) {
+    return this._mentions.model.mentions.findMany({
+      where: {
+        platform,
+        OR: [
+          {
+            name: {
+              contains: q,
+              mode: 'insensitive',
+            },
+          },
+          {
+            username: {
+              contains: q,
+              mode: 'insensitive',
+            },
+          },
+        ],
+      },
+      orderBy: {
+        name: 'asc',
+      },
+      take: 100,
+      select: {
+        name: true,
+        username: true,
+        image: true,
+      },
+    });
+  }
+
+  insertMentions(
+    platform: string,
+    mentions: { name: string; username: string; image: string }[]
+  ) {
+    if (mentions.length === 0) {
+      return [] as any[];
+    }
+    return this._mentions.model.mentions.createMany({
+      data: mentions.map((mention) => ({
+        platform,
+        name: mention.name,
+        username: mention.username,
+        image: mention.image,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  async checkPreviousConnections(org: string, id: string) {
+    const findIt = await this._integration.model.integration.findMany({
+      where: {
+        rootInternalId: id.split('_').pop(),
+      },
+      select: {
+        organizationId: true,
+        id: true,
+      },
+    });
+
+    if (findIt.some((f) => f.organizationId === org)) {
+      return false;
+    }
+
+    return findIt.length > 0;
+  }
 
   updateProviderSettings(org: string, id: string, settings: string) {
     return this._integration.model.integration.update({
@@ -549,9 +617,10 @@ export class IntegrationRepository {
     });
   }
 
-  async getPostingTimes(orgId: string) {
+  async getPostingTimes(orgId: string, integrationsId?: string) {
     return this._integration.model.integration.findMany({
       where: {
+        ...(integrationsId ? { id: integrationsId } : {}),
         organizationId: orgId,
         disabled: false,
         deletedAt: null,

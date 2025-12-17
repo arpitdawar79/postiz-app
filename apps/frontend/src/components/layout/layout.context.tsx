@@ -73,11 +73,13 @@ function LayoutContextInner(params: { children: ReactNode }) {
           : '/analytics?onboarding=true';
         return true;
       }
+
       if (response?.headers?.get('reload')) {
         window.location.reload();
         return true;
       }
-      if (response.status === 401) {
+
+      if (response.status === 401 || response?.headers?.get('logout')) {
         if (!isSecured) {
           setCookie('auth', '', -10);
           setCookie('showorg', '', -10);
@@ -85,6 +87,21 @@ function LayoutContextInner(params: { children: ReactNode }) {
         }
         window.location.href = '/';
       }
+      if (response.status === 406) {
+        if (
+          await deleteDialog(
+            'You are currently on trial, in order to use the feature you must finish the trial',
+            'Finish the trial, charge me now',
+            'Trial',
+
+          )
+        ) {
+          window.open('/billing?finishTrial=true', '_blank');
+          return false;
+        }
+        return false;
+      }
+
       if (response.status === 402) {
         if (
           await deleteDialog(
@@ -96,8 +113,9 @@ function LayoutContextInner(params: { children: ReactNode }) {
           )
         ) {
           window.open('/billing', '_blank');
+          return false;
         }
-        return false;
+        return true;
       }
       return true;
     },

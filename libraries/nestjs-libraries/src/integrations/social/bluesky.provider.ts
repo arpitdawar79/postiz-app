@@ -6,10 +6,18 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import {
+  BadBody,
   RefreshToken,
   SocialAbstract,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
-import { BskyAgent, RichText } from '@atproto/api';
+import {
+  BskyAgent,
+  RichText,
+  AppBskyEmbedVideo,
+  AppBskyVideoDefs,
+  AtpAgent,
+  BlobRef,
+} from '@atproto/api';
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
@@ -17,6 +25,8 @@ import sharp from 'sharp';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { timer } from '@gitroom/helpers/utils/timer';
 import axios from 'axios';
+import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 
 async function reduceImageBySize(url: string, maxSizeKB = 976) {
   try {
@@ -44,18 +54,107 @@ async function reduceImageBySize(url: string, maxSizeKB = 976) {
       if (width < 10 || height < 10) break; // Prevent overly small dimensions
     }
 
-    return imageBuffer;
+    return { width, height, buffer: imageBuffer };
   } catch (error) {
     console.error('Error processing image:', error);
     throw error;
   }
 }
 
+async function uploadVideo(
+  agent: AtpAgent,
+  videoPath: string
+): Promise<AppBskyEmbedVideo.Main> {
+  const { data: serviceAuth } = await agent.com.atproto.server.getServiceAuth({
+    aud: `did:web:${agent.dispatchUrl.host}`,
+    lxm: 'com.atproto.repo.uploadBlob',
+    exp: Date.now() / 1000 + 60 * 30, // 30 minutes
+  });
+
+  async function downloadVideo(
+    url: string
+  ): Promise<{ video: Buffer; size: number }> {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch video: ${response.statusText}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const video = Buffer.from(arrayBuffer);
+    const size = video.length;
+    return { video, size };
+  }
+
+  const video = await downloadVideo(videoPath);
+
+  console.log('Downloaded video', videoPath, video.size);
+
+  const uploadUrl = new URL(
+    'https://video.bsky.app/xrpc/app.bsky.video.uploadVideo'
+  );
+  uploadUrl.searchParams.append('did', agent.session!.did);
+  uploadUrl.searchParams.append('name', videoPath.split('/').pop()!);
+
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${serviceAuth.token}`,
+      'Content-Type': 'video/mp4',
+      'Content-Length': video.size.toString(),
+    },
+    body: video.video,
+  });
+
+  const jobStatus = (await uploadResponse.json()) as AppBskyVideoDefs.JobStatus;
+  console.log('JobId:', jobStatus.jobId);
+  let blob: BlobRef | undefined = jobStatus.blob;
+  const videoAgent = new AtpAgent({ service: 'https://video.bsky.app' });
+
+  while (!blob) {
+    const { data: status } = await videoAgent.app.bsky.video.getJobStatus({
+      jobId: jobStatus.jobId,
+    });
+    console.log(
+      'Status:',
+      status.jobStatus.state,
+      status.jobStatus.progress || ''
+    );
+    if (status.jobStatus.blob) {
+      blob = status.jobStatus.blob;
+    }
+
+    if (status.jobStatus.state === 'JOB_STATE_FAILED') {
+      throw new BadBody(
+        'bluesky',
+        JSON.stringify({}),
+        {} as any,
+        'Could not upload video, job failed'
+      );
+    }
+
+    await timer(30000);
+  }
+
+  console.log('posting video...');
+
+  return {
+    $type: 'app.bsky.embed.video',
+    video: blob,
+  } satisfies AppBskyEmbedVideo.Main;
+}
+
+@Rules(
+  'Bluesky can have maximum 1 video or 4 pictures in one post, it can also be without attachments'
+)
 export class BlueskyProvider extends SocialAbstract implements SocialProvider {
+  override maxConcurrentJob = 2; // Bluesky has moderate rate limits
   identifier = 'bluesky';
   name = 'Bluesky';
   isBetweenSteps = false;
   scopes = ['write:statuses', 'profile', 'write:media'];
+  editor = 'normal' as const;
+  maxLength() {
+    return 300;
+  }
 
   async customFields() {
     return [
@@ -131,7 +230,7 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
         accessToken: accessJwt,
         id: did,
         name: profile.data.displayName!,
-        picture: profile.data.avatar!,
+        picture: profile?.data?.avatar || '',
         username: profile.data.handle!,
       };
     } catch (e) {
@@ -164,17 +263,33 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
 
     let loadCid = '';
     let loadUri = '';
+    let replyCid = '';
+    let replyUri = '';
     const cidUrl = [] as { cid: string; url: string; rev: string }[];
     for (const post of postDetails) {
+      // Separate images and videos
+      const imageMedia =
+        post.media?.filter((p) => p.path.indexOf('mp4') === -1) || [];
+      const videoMedia =
+        post.media?.filter((p) => p.path.indexOf('mp4') !== -1) || [];
+
+      // Upload images
       const images = await Promise.all(
-        post.media
-          ?.filter((p) => p.url.indexOf('mp4') === -1)
-          .map(async (p) => {
-            return await agent.uploadBlob(
-              new Blob([await reduceImageBySize(p.url)])
-            );
-          }) || []
+        imageMedia.map(async (p) => {
+          const { buffer, width, height } = await reduceImageBySize(p.path);
+          return {
+            width,
+            height,
+            buffer: await agent.uploadBlob(new Blob([buffer])),
+          };
+        })
       );
+
+      // Upload videos (only one video per post is supported by Bluesky)
+      let videoEmbed: AppBskyEmbedVideo.Main | null = null;
+      if (videoMedia.length > 0) {
+        videoEmbed = await uploadVideo(agent, videoMedia[0].path);
+      }
 
       const rt = new RichText({
         text: post.message,
@@ -182,30 +297,38 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
 
       await rt.detectFacets(agent);
 
+      // Determine embed based on media types
+      let embed: any = {};
+      if (videoEmbed) {
+        // If there's a video, use video embed (Bluesky supports only one video per post)
+        embed = videoEmbed;
+      } else if (images.length > 0) {
+        // If there are images but no video, use image embed
+        embed = {
+          $type: 'app.bsky.embed.images',
+          images: images.map((p, index) => ({
+            alt: imageMedia?.[index]?.alt || '',
+            image: p.buffer.data.blob,
+            aspectRatio: {
+              width: p.width,
+              height: p.height,
+            },
+          })),
+        };
+      }
+
       // @ts-ignore
       const { cid, uri, commit } = await agent.post({
         text: rt.text,
         facets: rt.facets,
         createdAt: new Date().toISOString(),
-        ...(images.length
-          ? {
-              embed: {
-                $type: 'app.bsky.embed.images',
-                images: images.map((p) => ({
-                  alt: 'picture',
-                  // can be an array up to 4 values
-                  // alt: 'image', // the alt text - commented this out for now until there is a way to set this from within Postiz
-                  image: p.data.blob,
-                })),
-              },
-            }
-          : {}),
+        ...(Object.keys(embed).length > 0 ? { embed } : {}),
         ...(loadCid
           ? {
               reply: {
                 root: {
-                  uri: loadUri,
-                  cid: loadCid,
+                  uri: replyUri,
+                  cid: replyCid,
                 },
                 parent: {
                   uri: loadUri,
@@ -218,19 +341,25 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
 
       loadCid = loadCid || cid;
       loadUri = loadUri || uri;
+      replyCid = cid;
+      replyUri = uri;
 
       cidUrl.push({ cid, url: uri, rev: commit.rev });
     }
 
     if (postDetails?.[0]?.settings?.active_thread_finisher) {
       const rt = new RichText({
-        text: postDetails?.[0]?.settings?.thread_finisher,
+        text: stripHtmlValidation(
+          'normal',
+          postDetails?.[0]?.settings?.thread_finisher,
+          true
+        ),
       });
 
       await rt.detectFacets(agent);
 
       await agent.post({
-        text: postDetails?.[0]?.settings?.thread_finisher,
+        text: stripHtmlValidation('normal', rt.text, true),
         facets: rt.facets,
         createdAt: new Date().toISOString(),
         embed: {
@@ -371,7 +500,7 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
     if (getThread.data.thread.post?.likeCount >= +fields.likesAmount) {
       await timer(2000);
       const rt = new RichText({
-        text: fields.post,
+        text: stripHtmlValidation('normal', fields.post, true),
       });
 
       await agent.post({
@@ -397,5 +526,39 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
     }
 
     return true;
+  }
+
+  override async mention(
+    token: string,
+    d: { query: string },
+    id: string,
+    integration: Integration
+  ) {
+    const body = JSON.parse(
+      AuthService.fixedDecryption(integration.customInstanceDetails!)
+    );
+
+    const agent = new BskyAgent({
+      service: body.service,
+    });
+
+    await agent.login({
+      identifier: body.identifier,
+      password: body.password,
+    });
+
+    const list = await agent.searchActors({
+      q: d.query,
+    });
+
+    return list.data.actors.map((p) => ({
+      label: p.displayName,
+      id: p.handle,
+      image: p.avatar,
+    }));
+  }
+
+  mentionFormat(idOrHandle: string, name: string) {
+    return `@${idOrHandle}`;
   }
 }

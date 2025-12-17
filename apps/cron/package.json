@@ -4,8 +4,8 @@
   "description": "",
   "scripts": {
     "dev": "dotenv -e ../../.env -- nest start --watch --entryFile=./apps/cron/src/main",
-    "build": "NODE_ENV=production nest build",
-    "start": "dotenv -e ../../.env -- node ./dist/apps/cron/src/main.js",
+    "build": "cross-env NODE_ENV=production nest build",
+    "start": "dotenv -e ../../.env -- node --experimental-require-module ./dist/apps/cron/src/main.js",
     "pm2": "pm2 start pnpm --name cron -- start"
   },
   "keywords": [],

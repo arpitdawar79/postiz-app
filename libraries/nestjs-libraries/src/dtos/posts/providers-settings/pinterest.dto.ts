@@ -1,23 +1,21 @@
 import {
-  IsDefined,
-  IsOptional,
-  IsString,
-  IsUrl,
-  MinLength,
+  IsDefined, IsOptional, IsString, IsUrl, MaxLength, MinLength, ValidateIf
 } from 'class-validator';
+import { JSONSchema } from 'class-validator-jsonschema';
 
 export class PinterestSettingsDto {
   @IsString()
-  @IsOptional()
+  @ValidateIf((o) => !!o.title)
+  @MaxLength(100)
   title: string;
 
   @IsString()
-  @IsOptional()
+  @ValidateIf((o) => !!o.link)
   @IsUrl()
   link: string;
 
   @IsString()
-  @IsOptional()
+  @ValidateIf((o) => !!o.dominant_color)
   dominant_color: string;
 
   @IsDefined({
@@ -28,6 +26,9 @@ export class PinterestSettingsDto {
   })
   @MinLength(1, {
     message: 'Board is required',
+  })
+    @JSONSchema({
+    description: 'board must be an id',
   })
   board: string;
 }

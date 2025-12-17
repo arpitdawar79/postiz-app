@@ -4,11 +4,10 @@ import '@neynar/react/dist/style.css';
 import React, { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Web3ProviderInterface } from '@gitroom/frontend/components/launches/web3/web3.provider.interface';
 import { TopTitle } from '@gitroom/frontend/components/launches/helpers/top.title.component';
-import { useModals } from '@mantine/modals';
+import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import interClass from '@gitroom/react/helpers/inter.font';
 import { Input } from '@gitroom/react/form/input';
 import { Button } from '@gitroom/react/form/button';
 import copy from 'copy-to-clipboard';
@@ -91,8 +90,8 @@ export const TelegramProvider: FC<Web3ProviderInterface> = (props) => {
       </button>
       <div className="justify-center items-center flex flex-col pt-[16px]">
         <div>
-          {t('please_add', 'Please add')}
-          <strong>@{telegramBotName}</strong>
+          {t('please_add', 'Please add')}{' '}
+          <strong>@{telegramBotName}</strong>{' '}
           {t(
             'to_your_telegram_group_channel_and_click_here',
             'to your\n          telegram group / channel and click here:'
@@ -101,7 +100,7 @@ export const TelegramProvider: FC<Web3ProviderInterface> = (props) => {
         {!step ? (
           <div className="w-full mt-[16px]" onClick={loadAll}>
             <div
-              className={`cursor-pointer bg-[#2EA6DD] h-[44px] rounded-[4px] flex justify-center items-center text-white ${interClass} gap-[4px]`}
+              className={`cursor-pointer bg-[#2EA6DD] h-[44px] rounded-[4px] flex justify-center items-center text-white gap-[4px]`}
             >
               <svg
                 width="51"

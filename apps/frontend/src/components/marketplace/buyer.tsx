@@ -12,7 +12,6 @@ import React, {
 import { Checkbox } from '@gitroom/react/form/checkbox';
 import { useRouter, useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
-import interClass from '@gitroom/react/helpers/inter.font';
 import { Button } from '@gitroom/react/form/button';
 import {
   allTagsOptions,
@@ -21,7 +20,7 @@ import {
 import { capitalize, chunk, fill } from 'lodash';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import { useModals } from '@mantine/modals';
+import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { TopTitle } from '@gitroom/frontend/components/launches/helpers/top.title.component';
 import { Textarea } from '@gitroom/react/form/textarea';
 import { FormProvider, SubmitHandler, useForm } from 'react-hook-form';
@@ -434,7 +433,6 @@ export const Card: FC<{
                 <div
                   className={clsx(
                     'bg-customColor6 rounded-[34px] py-[8px] px-[12px] text-[12px]',
-                    interClass
                   )}
                 >
                   {t('content_writer', 'Content Writer')}
@@ -444,7 +442,6 @@ export const Card: FC<{
                 <div
                   className={clsx(
                     'bg-customColor6 rounded-[34px] py-[8px] px-[12px] text-[12px]',
-                    interClass
                   )}
                 >
                   {t('influencer', 'Influencer')}
@@ -467,7 +464,6 @@ export const Card: FC<{
           <div
             className={clsx(
               'gap-[8px] flex items-center text-[10px] font-[300] text-customColor41 tracking-[1.2px] uppercase',
-              interClass
             )}
           >
             {tags.map((tag, index) => (

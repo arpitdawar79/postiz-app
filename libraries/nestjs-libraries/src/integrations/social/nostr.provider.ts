@@ -7,7 +7,8 @@ import {
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import dayjs from 'dayjs';
 import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
-import { getPublicKey, Relay, finalizeEvent } from 'nostr-tools';
+import { getPublicKey, Relay, finalizeEvent, SimplePool } from 'nostr-tools';
+
 import WebSocket from 'ws';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 
@@ -15,19 +16,26 @@ import { AuthService } from '@gitroom/helpers/auth/auth.service';
 global.WebSocket = WebSocket;
 
 const list = [
-  'wss://relay.primal.net',
+  'wss://nos.lol',
   'wss://relay.damus.io',
   'wss://relay.snort.social',
-  'wss://nostr.wine',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
+  'wss://temp.iris.to',
+  'wss://vault.iris.to',
 ];
 
+const pool = new SimplePool();
+
 export class NostrProvider extends SocialAbstract implements SocialProvider {
+  override maxConcurrentJob = 5; // Nostr relays typically have generous limits
   identifier = 'nostr';
   name = 'Nostr';
   isBetweenSteps = false;
-  scopes = [];
+  scopes = [] as string[];
+  editor = 'normal' as const;
+
+  maxLength() {
+    return 100000;
+  }
 
   async customFields() {
     return [
@@ -62,29 +70,25 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
   }
 
   private async findRelayInformation(pubkey: string) {
-    for (const relay of list) {
-      const relayInstance = await Relay.connect(relay);
-      const value = await new Promise<any>((resolve) => {
-        console.log('connecting');
-        relayInstance.subscribe([{ kinds: [0], authors: [pubkey] }], {
-          eoseTimeout: 6000,
-          onevent: (event) => {
-            resolve(event);
-          },
-          oneose: () => {
-            resolve({});
-          },
-          onclose: () => {
-            resolve({});
-          },
-        });
-      });
+    // This queries ALL relays in parallel and resolves with
+    // the first matching event from ANY relay.
+    const evt = await pool.get(list, {
+      kinds: [0],
+      authors: [pubkey],
+      limit: 1,
+    });
 
-      relayInstance.close();
-      const content = JSON.parse(value?.content || '{}');
-      if (content.name || content.displayName || content.display_name) {
-        return content;
-      }
+    if (!evt) return {};
+
+    let content: any = {};
+    try {
+      content = JSON.parse(evt.content || '{}');
+    } catch {
+      return {};
+    }
+
+    if (content.name || content.displayName || content.display_name) {
+      return content;
     }
 
     return {};
@@ -140,12 +144,12 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
       const user = await this.findRelayInformation(pubkey);
 
       return {
-        id: String(user.pubkey),
-        name: user.display_name || user.displayName || 'No Name',
+        id: pubkey,
+        name: user.display_name || user.displayName || user.name || 'No Name',
         accessToken: AuthService.signJWT({ password: body.password }),
         refreshToken: '',
         expiresIn: dayjs().add(200, 'year').unix() - dayjs().unix(),
-        picture: user.picture,
+        picture: user?.picture || '',
         username: user.name || 'nousername',
       };
     } catch (e) {
@@ -168,7 +172,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
         {
           kind: 1, // Text note
           content:
-            post.message + '\n\n' + post.media?.map((m) => m.url).join('\n\n'),
+            post.message + '\n\n' + post.media?.map((m) => m.path).join('\n\n'),
           tags: [
             ...(lastId
               ? [
